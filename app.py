@@ -412,6 +412,10 @@ def main():
             "labelProperty": "label",
             "renderLabel": True,
         },
+        interaction={
+            "zoomSpeed": 0.2,  # Lower = less sensitive (default is 1)
+            "zoomView": True,
+        },
     )
 
     # Render the graph
