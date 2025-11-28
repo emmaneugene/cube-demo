@@ -1,7 +1,10 @@
 [project]
 name = "cube-demo"
 version = "0.1.0"
-description = "Add your description here"
+description = "Simple cube demo app"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["streamlit", "streamlit-agraph"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
