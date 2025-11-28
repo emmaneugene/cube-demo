@@ -288,54 +288,56 @@ def render_relation_editor(model: Model):
     if len(cube_names) >= 2:
         with st.container(border=True):
             with st.expander("Add New", expanded=False, icon="➕"):
-                with st.form("add_relation_form"):
-                    col1, col2 = st.columns(2)
+                # Cube selection outside form for dynamic updates
+                col1, col2 = st.columns(2)
 
-                    with col1:
-                        left_cube_name = st.selectbox(
-                            "From Cube",
-                            cube_names,
-                            key="new_rel_left_cube",
-                        )
+                with col1:
+                    left_cube_name = st.selectbox(
+                        "From Cube",
+                        cube_names,
+                        key="new_rel_left_cube",
+                    )
 
-                    with col2:
-                        right_cube_name = st.selectbox(
-                            "To Cube",
-                            cube_names,
-                            key="new_rel_right_cube",
-                        )
+                with col2:
+                    right_cube_name = st.selectbox(
+                        "To Cube",
+                        cube_names,
+                        key="new_rel_right_cube",
+                    )
 
-                    # Get columns for selected cubes
-                    left_cube = model.cubes.get(left_cube_name)
-                    right_cube = model.cubes.get(right_cube_name)
+                # Get columns for selected cubes (now updates dynamically)
+                left_cube = model.cubes.get(left_cube_name)
+                right_cube = model.cubes.get(right_cube_name)
+                left_columns = left_cube.columns if left_cube else []
+                right_columns = right_cube.columns if right_cube else []
 
-                    col3, col4 = st.columns(2)
+                col3, col4 = st.columns(2)
 
-                    with col3:
-                        left_columns = left_cube.columns if left_cube else []
-                        left_column = st.selectbox(
-                            "From Column",
-                            left_columns,
-                            key="new_rel_left_col",
-                        )
+                with col3:
+                    left_column = st.selectbox(
+                        "From Column",
+                        left_columns,
+                        key="new_rel_left_col",
+                    )
 
-                    with col4:
-                        right_columns = right_cube.columns if right_cube else []
-                        right_column = st.selectbox(
-                            "To Column",
-                            right_columns,
-                            key="new_rel_right_col",
-                        )
+                with col4:
+                    right_column = st.selectbox(
+                        "To Column",
+                        right_columns,
+                        key="new_rel_right_col",
+                    )
 
-                    submitted = st.form_submit_button("Add Relation", use_container_width=True)
-
-                    if submitted and left_cube_name and right_cube_name and left_column and right_column:
+                # Submit button
+                if st.button("Add Relation", use_container_width=True, key="add_relation_btn"):
+                    if left_cube_name and right_cube_name and left_column and right_column:
                         try:
                             db.create_relation(left_cube_name, right_cube_name, left_column, right_column)
                             st.success(f"Created relation: {left_cube_name}.{left_column} -> {right_cube_name}.{right_column}")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error: {e}")
+                    else:
+                        st.error("Please select all fields")
     else:
         st.info("Add at least 2 cubes to create relations")
 
