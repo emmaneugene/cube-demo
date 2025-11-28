@@ -210,7 +210,7 @@ def create_relation(
     left_column: str,
     right_column: str,
     db_path: Path = DEFAULT_DB_PATH,
-) -> int:
+) -> int | None:
     """Create a new relation in the database. Returns the relation ID."""
     conn = get_connection(db_path)
     cursor = conn.cursor()
@@ -332,7 +332,7 @@ def load_model_from_db(db_path: Path = DEFAULT_DB_PATH):
                     left_column=rel_data["left_column"],
                     right_column=rel_data["right_column"],
                 )
-                model.relations.append(relation)
+                model.relations.add(relation)
             except ValueError:
                 # Skip invalid relations (e.g., column no longer exists)
                 pass

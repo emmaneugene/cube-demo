@@ -93,7 +93,7 @@ class TestModel:
         model = Model(name="ecommerce")
         assert model.name == "ecommerce"
         assert model.cubes == {}
-        assert model.relations == []
+        assert model.relations == set()
 
     def test_add_cube(self):
         model = Model()
@@ -141,7 +141,7 @@ class TestModel:
         model.add_relation(relation)
 
         assert len(model.relations) == 1
-        assert model.relations[0] == relation
+        assert relation in model.relations
 
     def test_add_relation_missing_left_cube(self):
         model = Model()

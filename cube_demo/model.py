@@ -11,7 +11,7 @@ class Model:
 
     name: str = "Model"
     cubes: dict[str, Cube] = field(default_factory=dict)
-    relations: list[Relation] = field(default_factory=list)
+    relations: set[Relation] = field(default_factory=set)
 
     def add_cube(self, cube: Cube) -> None:
         """Add a cube to the model."""
@@ -35,7 +35,7 @@ class Model:
             raise ValueError(
                 f"Right cube '{relation.right_cube.name}' not found in model"
             )
-        self.relations.append(relation)
+        self.relations.add(relation)
 
     def remove_cube(self, name: str) -> bool:
         """Remove a cube and all relations referencing it."""
@@ -43,11 +43,11 @@ class Model:
             return False
 
         # Remove all relations involving this cube
-        self.relations = [
+        self.relations = {
             rel
             for rel in self.relations
             if rel.left_cube.name != name and rel.right_cube.name != name
-        ]
+        }
 
         # Remove the cube
         del self.cubes[name]
@@ -77,50 +77,55 @@ class Model:
         self.cubes[name].columns = columns
 
         # Remove relations with invalid columns
-        self.relations = [
+        self.relations = {
             rel
             for rel in self.relations
             if (
                 (rel.left_cube.name != name or rel.left_column in columns)
                 and (rel.right_cube.name != name or rel.right_column in columns)
             )
-        ]
+        }
 
         return True
 
-    def remove_relation(self, index: int) -> bool:
-        """Remove a relation by index."""
-        if 0 <= index < len(self.relations):
-            self.relations.pop(index)
+    def remove_relation(self, relation: Relation) -> bool:
+        """Remove a relation from the model."""
+        if relation in self.relations:
+            self.relations.discard(relation)
             return True
         return False
 
     def update_relation(
         self,
-        index: int,
+        old_relation: Relation,
         left_column: str | None = None,
         right_column: str | None = None,
     ) -> bool:
-        """Update a relation's column mappings."""
-        if not (0 <= index < len(self.relations)):
+        """Update a relation's column mappings by replacing it."""
+        if old_relation not in self.relations:
             return False
 
-        relation = self.relations[index]
+        new_left_col = left_column if left_column is not None else old_relation.left_column
+        new_right_col = right_column if right_column is not None else old_relation.right_column
 
-        if left_column is not None:
-            if left_column not in relation.left_cube.columns:
-                raise ValueError(
-                    f"Column '{left_column}' not in cube '{relation.left_cube.name}'"
-                )
-            relation.left_column = left_column
+        if new_left_col not in old_relation.left_cube.columns:
+            raise ValueError(
+                f"Column '{new_left_col}' not in cube '{old_relation.left_cube.name}'"
+            )
+        if new_right_col not in old_relation.right_cube.columns:
+            raise ValueError(
+                f"Column '{new_right_col}' not in cube '{old_relation.right_cube.name}'"
+            )
 
-        if right_column is not None:
-            if right_column not in relation.right_cube.columns:
-                raise ValueError(
-                    f"Column '{right_column}' not in cube '{relation.right_cube.name}'"
-                )
-            relation.right_column = right_column
-
+        # Remove old and add new (since relations are hashable, we can't mutate in place)
+        self.relations.discard(old_relation)
+        new_relation = Relation(
+            left_cube=old_relation.left_cube,
+            right_cube=old_relation.right_cube,
+            left_column=new_left_col,
+            right_column=new_right_col,
+        )
+        self.relations.add(new_relation)
         return True
 
     def to_graph_data(self) -> dict[str, Any]:
