@@ -107,6 +107,32 @@ db.create_relation("orders", "users", "user_id", "id")
 model = db.load_model_from_db()
 ```
 
+## Running Tests
+
+Run the test suite with pytest:
+
+```bash
+# Using uv
+uv run pytest -v
+
+# Using pip (with venv activated)
+pytest -v
+```
+
+Run a specific test file or test:
+
+```bash
+uv run pytest tests/test_model.py -v
+uv run pytest tests/test_model.py::TestCube -v
+uv run pytest tests/test_model.py::TestCube::test_create_cube_with_name -v
+```
+
+Run with coverage:
+
+```bash
+uv run pytest --cov=cube_demo -v
+```
+
 ## Project Structure
 
 ```
