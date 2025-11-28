@@ -12,11 +12,51 @@ class Model:
     name: str = "Model"
     cubes: dict[str, Cube] = field(default_factory=dict)
     _adjacency: dict[str, list[Relation]] = field(default_factory=dict)
+    _reachability: dict[str, dict[str, int]] = field(default_factory=dict)
 
     @property
     def relations(self) -> set[Relation]:
         """Returns all relations as a flat set."""
         return {rel for rels in self._adjacency.values() for rel in rels}
+
+    @property
+    def reachability(self) -> dict[str, dict[str, int]]:
+        """Returns the stored reachability mapping with distances."""
+        return self._reachability
+
+    def compute_reachability(self) -> dict[str, dict[str, int]]:
+        """Compute and store the reachability for all cubes.
+
+        For each cube, determines which other cubes are accessible by
+        following directed edges in the DAG, along with the join distance.
+
+        Returns:
+            Dict mapping each cube to {reachable_cube: distance}.
+        """
+        result: dict[str, dict[str, int]] = {}
+
+        for cube_name in self.cubes:
+            distances: dict[str, int] = {}
+            queue = [(cube_name, 0)]
+            visited = {cube_name}
+
+            while queue:
+                current, dist = queue.pop(0)
+                for rel in self._adjacency.get(current, []):
+                    target = rel.right_cube.name
+                    if target not in visited:
+                        visited.add(target)
+                        distances[target] = dist + 1
+                        queue.append((target, dist + 1))
+
+            result[cube_name] = distances
+
+        self._reachability = result
+        return result
+
+    def set_reachability(self, reachability: dict[str, dict[str, int]]) -> None:
+        """Set the reachability dictionary directly (e.g., when loading from DB)."""
+        self._reachability = reachability
 
     def add_cube(self, cube: Cube) -> None:
         """Add a cube to the model."""
@@ -263,6 +303,10 @@ class Model:
     def generate_sql_query(self, selected_columns: list[str]) -> str:
         """Generate a SQL query with JOINs based on selected columns.
 
+        Uses the precomputed reachability dictionary to find a starting cube
+        that can reach all involved cubes. Includes all columns from the
+        starting cube in the SELECT clause.
+
         Args:
             selected_columns: List of columns in "cube.column" format
 
@@ -286,12 +330,12 @@ class Model:
                 columns_by_cube[cube_name] = []
             columns_by_cube[cube_name].append(col_name)
 
-        involved_cubes = list(columns_by_cube.keys())
+        involved_cubes = set(columns_by_cube.keys())
 
-        # If only one cube, no JOINs needed
+        # If only one cube, no JOINs needed - return all columns from that cube
         if len(involved_cubes) == 1:
-            cube_name = involved_cubes[0]
-            cols = ", ".join(f"{cube_name}.{c}" for c in columns_by_cube[cube_name])
+            cube_name = next(iter(involved_cubes))
+            cols = ", ".join(f"{cube_name}.{c}" for c in self.cubes[cube_name].columns)
             return f"SELECT {cols}\nFROM {cube_name}"
 
         # Build directed adjacency graph from relations (only left → right)
@@ -302,23 +346,28 @@ class Model:
         for rel in self.relations:
             left = rel.left_cube.name
             right = rel.right_cube.name
-            # Only forward direction (respecting DAG)
             adjacency[left].append((right, rel.left_column, rel.right_column, rel.cardinality))
 
-        # Find the best starting cube among involved cubes
-        # Prefer a cube that is a root (no incoming edges from other involved cubes)
-        involved_set = set(involved_cubes)
-        cubes_with_incoming: set[str] = set()
-        for cube in involved_cubes:
-            for target, _, _, _ in adjacency[cube]:
-                if target in involved_set:
-                    cubes_with_incoming.add(target)
+        # Find all candidate starting cubes that can reach all involved cubes
+        candidates: list[str] = []
+        for cube_name, reachable in self._reachability.items():
+            other_cubes = involved_cubes - {cube_name}
+            if other_cubes <= set(reachable.keys()):
+                candidates.append(cube_name)
 
-        # Start from a root cube if possible, otherwise first involved cube
-        root_candidates = [c for c in involved_cubes if c not in cubes_with_incoming]
-        start_cube = root_candidates[0] if root_candidates else involved_cubes[0]
+        if not candidates:
+            return "Error: No cube can reach all selected cubes. Check reachability."
 
-        # BFS to find paths following directed edges only
+        # Use stored distances to find candidate with minimum total joins
+        def count_joins(candidate: str) -> int:
+            """Sum distances to all involved cubes using stored reachability."""
+            distances = self._reachability.get(candidate, {})
+            return sum(distances.get(cube, 0) for cube in involved_cubes if cube != candidate)
+
+        # Select the candidate with the minimum total joins
+        start_cube = min(candidates, key=count_joins)
+
+        # BFS to find paths from start_cube following directed edges
         visited = {start_cube}
         queue = [start_cube]
         parent: dict[str, tuple[str, str, str, Cardinality] | None] = {start_cube: None}
@@ -331,16 +380,10 @@ class Model:
                     parent[target] = (current, left_col, right_col, cardinality)
                     queue.append(target)
 
-        # Check if all involved cubes are reachable via directed paths
-        for cube_name in involved_cubes:
-            if cube_name not in visited:
-                return f"Error: Cannot connect cube '{cube_name}' - no directed path exists from '{start_cube}'"
-
-        # Reconstruct joins needed to connect all involved cubes
-        cubes_to_join = set(involved_cubes)
-        cubes_to_join.remove(start_cube)
+        # Determine which cubes need to be joined (all involved cubes except start)
+        cubes_to_join = involved_cubes - {start_cube}
         joined_cubes = {start_cube}
-        join_clauses = []
+        join_clauses: list[str] = []
 
         # Map cardinality to SQL JOIN type
         def get_join_type(cardinality: Cardinality) -> str:
@@ -362,7 +405,6 @@ class Model:
                 if p is None:
                     break
                 prev, left_col, right_col, cardinality = p
-                # Edge goes from prev -> current
                 path.append((prev, current, left_col, right_col, cardinality))
                 current = prev
 
@@ -375,8 +417,20 @@ class Model:
                     )
                     joined_cubes.add(to_cube)
 
-        # Build SELECT clause
-        select_cols = ", ".join(selected_columns)
+        # Build SELECT clause: all columns from start_cube + selected columns from other cubes
+        select_parts: list[str] = []
+
+        # Add all columns from the starting cube
+        for col in self.cubes[start_cube].columns:
+            select_parts.append(f"{start_cube}.{col}")
+
+        # Add selected columns from other cubes (avoiding duplicates)
+        start_cube_cols = {f"{start_cube}.{c}" for c in self.cubes[start_cube].columns}
+        for col_ref in selected_columns:
+            if col_ref not in start_cube_cols:
+                select_parts.append(col_ref)
+
+        select_cols = ", ".join(select_parts)
 
         # Build FROM clause
         from_clause = f"FROM {start_cube}"
