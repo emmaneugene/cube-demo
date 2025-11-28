@@ -65,7 +65,9 @@ class TestRelation:
         customers = Cube(name="customers", columns=["id", "name"])
         orders = Cube(name="orders", columns=["id", "customer_id"])
 
-        with pytest.raises(ValueError, match="Column 'invalid' not found in cube 'orders'"):
+        with pytest.raises(
+            ValueError, match="Column 'invalid' not found in cube 'orders'"
+        ):
             Relation(
                 left_cube=orders,
                 right_cube=customers,
@@ -77,7 +79,9 @@ class TestRelation:
         customers = Cube(name="customers", columns=["id", "name"])
         orders = Cube(name="orders", columns=["id", "customer_id"])
 
-        with pytest.raises(ValueError, match="Column 'invalid' not found in cube 'customers'"):
+        with pytest.raises(
+            ValueError, match="Column 'invalid' not found in cube 'customers'"
+        ):
             Relation(
                 left_cube=orders,
                 right_cube=customers,
@@ -228,15 +232,9 @@ class TestIntegration:
             model.add_cube(cube)
 
         # Create relations
-        model.add_relation(
-            Relation(orders, customers, "customer_id", "id")
-        )
-        model.add_relation(
-            Relation(order_items, orders, "order_id", "id")
-        )
-        model.add_relation(
-            Relation(order_items, products, "product_id", "id")
-        )
+        model.add_relation(Relation(orders, customers, "customer_id", "id"))
+        model.add_relation(Relation(order_items, orders, "order_id", "id"))
+        model.add_relation(Relation(order_items, products, "product_id", "id"))
 
         # Verify model structure
         assert len(model.cubes) == 4
@@ -246,4 +244,3 @@ class TestIntegration:
         graph_data = model.to_graph_data()
         assert len(graph_data["nodes"]) == 4
         assert len(graph_data["edges"]) == 3
-

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Any
 
 from cube_demo.cube import Cube
@@ -12,23 +13,24 @@ class Model:
     name: str = "Model"
     cubes: dict[str, Cube] = field(default_factory=dict)
     _adjacency: dict[str, list[Relation]] = field(default_factory=dict)
-    _reachability: dict[str, dict[str, int]] = field(default_factory=dict)
 
     @property
     def relations(self) -> set[Relation]:
         """Returns all relations as a flat set."""
         return {rel for rels in self._adjacency.values() for rel in rels}
 
-    @property
-    def reachability(self) -> dict[str, dict[str, int]]:
-        """Returns the stored reachability mapping with distances."""
-        return self._reachability
+    def _invalidate_reachability_cache(self) -> None:
+        """Clear the cached reachability data."""
+        self.__dict__.pop("reachability", None)
+        self.__dict__.pop("_all_reachability", None)
 
-    def compute_reachability(self) -> dict[str, dict[str, int]]:
-        """Compute and store the reachability for all cubes.
+    @cached_property
+    def reachability(self) -> dict[str, dict[str, int]]:
+        """Compute reachability for all cubes (cached).
 
         For each cube, determines which other cubes are accessible by
         following directed edges in the DAG, along with the join distance.
+        Cache is invalidated when cubes or relations are modified.
 
         Returns:
             Dict mapping each cube to {reachable_cube: distance}.
@@ -51,18 +53,33 @@ class Model:
 
             result[cube_name] = distances
 
-        self._reachability = result
         return result
 
-    def set_reachability(self, reachability: dict[str, dict[str, int]]) -> None:
-        """Set the reachability dictionary directly (e.g., when loading from DB)."""
-        self._reachability = reachability
+    @cached_property
+    def _all_reachability(self) -> dict[str, set[str]]:
+        """For each cube, all cubes it can be queried with (bidirectional).
+
+        Derived from reachability: if A can reach B, then both A and B
+        can be queried together.
+
+        Returns:
+            Dict mapping each cube to set of queryable cubes.
+        """
+        result: dict[str, set[str]] = {name: set() for name in self.cubes}
+
+        for cube_name, reachable in self.reachability.items():
+            for target in reachable:
+                result[cube_name].add(target)
+                result[target].add(cube_name)
+
+        return result
 
     def add_cube(self, cube: Cube) -> None:
         """Add a cube to the model."""
         if cube.name in self.cubes:
             raise ValueError(f"Cube '{cube.name}' already exists in model")
         self.cubes[cube.name] = cube
+        self._invalidate_reachability_cache()
 
     def get_cube(self, name: str) -> Cube:
         """Get a cube by name."""
@@ -151,6 +168,7 @@ class Model:
         if left_name not in self._adjacency:
             self._adjacency[left_name] = []
         self._adjacency[left_name].append(relation)
+        self._invalidate_reachability_cache()
 
     def remove_cube(self, name: str) -> bool:
         """Remove a cube and all relations referencing it."""
@@ -164,8 +182,7 @@ class Model:
         # Remove incoming relations to this cube from all other cubes
         for source in list(self._adjacency.keys()):
             self._adjacency[source] = [
-                rel for rel in self._adjacency[source]
-                if rel.right_cube.name != name
+                rel for rel in self._adjacency[source] if rel.right_cube.name != name
             ]
             # Clean up empty lists
             if not self._adjacency[source]:
@@ -173,6 +190,7 @@ class Model:
 
         # Remove the cube
         del self.cubes[name]
+        self._invalidate_reachability_cache()
         return True
 
     def rename_cube(self, old_name: str, new_name: str) -> bool:
@@ -188,6 +206,7 @@ class Model:
         # Update cubes dict
         del self.cubes[old_name]
         self.cubes[new_name] = cube
+        self._invalidate_reachability_cache()
 
         return True
 
@@ -201,7 +220,8 @@ class Model:
         # Remove relations with invalid columns from all adjacency lists
         for source in list(self._adjacency.keys()):
             self._adjacency[source] = [
-                rel for rel in self._adjacency[source]
+                rel
+                for rel in self._adjacency[source]
                 if (
                     (rel.left_cube.name != name or rel.left_column in columns)
                     and (rel.right_cube.name != name or rel.right_column in columns)
@@ -211,6 +231,7 @@ class Model:
             if not self._adjacency[source]:
                 del self._adjacency[source]
 
+        self._invalidate_reachability_cache()
         return True
 
     def remove_relation(self, relation: Relation) -> bool:
@@ -228,6 +249,7 @@ class Model:
             # Clean up empty lists
             if not self._adjacency[left_name]:
                 del self._adjacency[left_name]
+            self._invalidate_reachability_cache()
             return True
         return False
 
@@ -239,11 +261,18 @@ class Model:
     ) -> bool:
         """Update a relation's column mappings by replacing it."""
         left_name = old_relation.left_cube.name
-        if left_name not in self._adjacency or old_relation not in self._adjacency[left_name]:
+        if (
+            left_name not in self._adjacency
+            or old_relation not in self._adjacency[left_name]
+        ):
             return False
 
-        new_left_col = left_column if left_column is not None else old_relation.left_column
-        new_right_col = right_column if right_column is not None else old_relation.right_column
+        new_left_col = (
+            left_column if left_column is not None else old_relation.left_column
+        )
+        new_right_col = (
+            right_column if right_column is not None else old_relation.right_column
+        )
 
         if new_left_col not in old_relation.left_cube.columns:
             raise ValueError(
@@ -268,6 +297,7 @@ class Model:
             cardinality=old_relation.cardinality,
         )
         self._adjacency[left_name].append(new_relation)
+        self._invalidate_reachability_cache()
         return True
 
     def to_graph_data(self) -> dict[str, Any]:
@@ -346,11 +376,14 @@ class Model:
         for rel in self.relations:
             left = rel.left_cube.name
             right = rel.right_cube.name
-            adjacency[left].append((right, rel.left_column, rel.right_column, rel.cardinality))
+            adjacency[left].append(
+                (right, rel.left_column, rel.right_column, rel.cardinality)
+            )
 
         # Find all candidate starting cubes that can reach all involved cubes
+        reachability = self.reachability
         candidates: list[str] = []
-        for cube_name, reachable in self._reachability.items():
+        for cube_name, reachable in reachability.items():
             other_cubes = involved_cubes - {cube_name}
             if other_cubes <= set(reachable.keys()):
                 candidates.append(cube_name)
@@ -358,11 +391,13 @@ class Model:
         if not candidates:
             return "Error: No cube can reach all selected cubes. Check reachability."
 
-        # Use stored distances to find candidate with minimum total joins
+        # Use distances to find candidate with minimum total joins
         def count_joins(candidate: str) -> int:
-            """Sum distances to all involved cubes using stored reachability."""
-            distances = self._reachability.get(candidate, {})
-            return sum(distances.get(cube, 0) for cube in involved_cubes if cube != candidate)
+            """Sum distances to all involved cubes using reachability."""
+            distances = reachability.get(candidate, {})
+            return sum(
+                distances.get(cube, 0) for cube in involved_cubes if cube != candidate
+            )
 
         # Select the candidate with the minimum total joins
         start_cube = min(candidates, key=count_joins)
@@ -440,4 +475,3 @@ class Model:
         sql_parts.extend(join_clauses)
 
         return "\n".join(sql_parts)
-

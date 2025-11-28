@@ -15,4 +15,3 @@ class Cube:
         if not isinstance(other, Cube):
             return NotImplemented
         return self.name == other.name
-

@@ -37,7 +37,12 @@ class Relation:
 
     def __hash__(self) -> int:
         return hash(
-            (self.left_cube.name, self.right_cube.name, self.left_column, self.right_column)
+            (
+                self.left_cube.name,
+                self.right_cube.name,
+                self.left_column,
+                self.right_column,
+            )
         )
 
     def __eq__(self, other: object) -> bool:
@@ -54,4 +59,3 @@ class Relation:
     def label(self) -> str:
         """Returns a label describing the join."""
         return f"{self.left_cube.name}.{self.left_column} → {self.right_cube.name}.{self.right_column} ({self.cardinality.value})"
-

@@ -321,46 +321,6 @@ def delete_relation(relation_id: int, db_path: Path = DEFAULT_DB_PATH) -> bool:
     return deleted
 
 
-def save_reachability(
-    reachability: dict[str, dict[str, int]], db_path: Path = DEFAULT_DB_PATH
-) -> None:
-    """Save reachability data (with distances) for all cubes to the database."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
-
-    for cube_name, reachable_cubes in reachability.items():
-        # Store as JSON object: {"cube_name": distance, ...}
-        cursor.execute(
-            "UPDATE cubes SET reachable_cubes = ? WHERE name = ?",
-            (json.dumps(reachable_cubes), cube_name),
-        )
-
-    conn.commit()
-    conn.close()
-
-
-def load_reachability(db_path: Path = DEFAULT_DB_PATH) -> dict[str, dict[str, int]]:
-    """Load reachability data (with distances) for all cubes from the database."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT name, reachable_cubes FROM cubes")
-    rows = cursor.fetchall()
-    conn.close()
-
-    result: dict[str, dict[str, int]] = {}
-    for row in rows:
-        reachable_data = json.loads(row["reachable_cubes"])
-        # Handle both old format (list) and new format (dict)
-        if isinstance(reachable_data, list):
-            # Legacy format: convert list to dict with distance 1 (approximate)
-            result[row["name"]] = {cube: 1 for cube in reachable_data}
-        else:
-            result[row["name"]] = reachable_data
-
-    return result
-
-
 def load_model_from_db(db_path: Path = DEFAULT_DB_PATH):
     """Load a complete Model from the database."""
     from cube_demo.model import Model
@@ -395,9 +355,4 @@ def load_model_from_db(db_path: Path = DEFAULT_DB_PATH):
                 # Skip invalid relations (e.g., column no longer exists, or would create cycle)
                 pass
 
-    # Load reachability data
-    reachability = load_reachability(db_path)
-    model.set_reachability(reachability)
-
     return model
-

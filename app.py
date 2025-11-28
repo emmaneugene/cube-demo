@@ -84,7 +84,12 @@ def model_to_agraph(model: Model) -> tuple[list[Node], list[Edge]]:
                 label=label,
                 size=30,
                 color=colors[i % len(colors)],
-                font={"size": 12, "face": "monospace", "color": "#ffffff", "align": "left"},
+                font={
+                    "size": 12,
+                    "face": "monospace",
+                    "color": "#ffffff",
+                    "align": "left",
+                },
                 shape="box",
                 borderWidth=2,
                 shadow=True,
@@ -125,7 +130,11 @@ def render_cube_editor(model: Model):
                 submitted = st.form_submit_button("Add Cube", use_container_width=True)
 
                 if submitted and new_cube_name:
-                    columns = [c.strip() for c in new_cube_columns.strip().split("\n") if c.strip()]
+                    columns = [
+                        c.strip()
+                        for c in new_cube_columns.strip().split("\n")
+                        if c.strip()
+                    ]
                     try:
                         db.create_cube(new_cube_name, columns)
                         st.success(f"Created cube '{new_cube_name}'")
@@ -140,7 +149,9 @@ def render_cube_editor(model: Model):
         with st.expander(f"{cube.name}", expanded=False):
             # Edit cube name
             with st.form(f"edit_cube_{cube.name}"):
-                new_name = st.text_input("Name", value=cube.name, key=f"name_{cube.name}")
+                new_name = st.text_input(
+                    "Name", value=cube.name, key=f"name_{cube.name}"
+                )
                 new_columns = st.text_area(
                     "Columns (one per line)",
                     value="\n".join(cube.columns),
@@ -150,12 +161,18 @@ def render_cube_editor(model: Model):
 
                 col1, col2 = st.columns(2)
                 with col1:
-                    save_clicked = st.form_submit_button("Save", use_container_width=True)
+                    save_clicked = st.form_submit_button(
+                        "Save", use_container_width=True
+                    )
                 with col2:
-                    delete_clicked = st.form_submit_button("Delete", use_container_width=True)
+                    delete_clicked = st.form_submit_button(
+                        "Delete", use_container_width=True
+                    )
 
                 if save_clicked:
-                    columns = [c.strip() for c in new_columns.strip().split("\n") if c.strip()]
+                    columns = [
+                        c.strip() for c in new_columns.strip().split("\n") if c.strip()
+                    ]
                     try:
                         db.update_cube(cube.name, new_name=new_name, columns=columns)
                         st.success(f"Updated cube '{new_name}'")
@@ -233,11 +250,26 @@ def render_relation_editor(model: Model):
                 cardinality = cardinality_options[cardinality_label]
 
                 # Submit button
-                if st.button("Add Relation", use_container_width=True, key="add_relation_btn"):
-                    if left_cube_name and right_cube_name and left_column and right_column:
+                if st.button(
+                    "Add Relation", use_container_width=True, key="add_relation_btn"
+                ):
+                    if (
+                        left_cube_name
+                        and right_cube_name
+                        and left_column
+                        and right_column
+                    ):
                         try:
-                            db.create_relation(left_cube_name, right_cube_name, left_column, right_column, cardinality)
-                            st.success(f"Created relation: {left_cube_name}.{left_column} -> {right_cube_name}.{right_column} ({cardinality.value})")
+                            db.create_relation(
+                                left_cube_name,
+                                right_cube_name,
+                                left_column,
+                                right_column,
+                                cardinality,
+                            )
+                            st.success(
+                                f"Created relation: {left_cube_name}.{left_column} -> {right_cube_name}.{right_column} ({cardinality.value})"
+                            )
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error: {e}")
@@ -260,14 +292,18 @@ def render_relation_editor(model: Model):
                 st.markdown(f"**To:** `{rel['right_cube']}`")
 
                 # Get available columns
-                left_cube = model.cubes.get(rel['left_cube'])
-                right_cube = model.cubes.get(rel['right_cube'])
+                left_cube = model.cubes.get(rel["left_cube"])
+                right_cube = model.cubes.get(rel["right_cube"])
 
                 col1, col2 = st.columns(2)
 
                 with col1:
-                    left_cols = left_cube.columns if left_cube else [rel['left_column']]
-                    left_idx = left_cols.index(rel['left_column']) if rel['left_column'] in left_cols else 0
+                    left_cols = left_cube.columns if left_cube else [rel["left_column"]]
+                    left_idx = (
+                        left_cols.index(rel["left_column"])
+                        if rel["left_column"] in left_cols
+                        else 0
+                    )
                     new_left_col = st.selectbox(
                         "From Column",
                         left_cols,
@@ -276,8 +312,14 @@ def render_relation_editor(model: Model):
                     )
 
                 with col2:
-                    right_cols = right_cube.columns if right_cube else [rel['right_column']]
-                    right_idx = right_cols.index(rel['right_column']) if rel['right_column'] in right_cols else 0
+                    right_cols = (
+                        right_cube.columns if right_cube else [rel["right_column"]]
+                    )
+                    right_idx = (
+                        right_cols.index(rel["right_column"])
+                        if rel["right_column"] in right_cols
+                        else 0
+                    )
                     new_right_col = st.selectbox(
                         "To Column",
                         right_cols,
@@ -288,27 +330,37 @@ def render_relation_editor(model: Model):
                 col3, col4 = st.columns(2)
 
                 with col3:
-                    save_clicked = st.form_submit_button("Save", use_container_width=True)
+                    save_clicked = st.form_submit_button(
+                        "Save", use_container_width=True
+                    )
 
                 with col4:
-                    delete_clicked = st.form_submit_button("Delete", use_container_width=True)
+                    delete_clicked = st.form_submit_button(
+                        "Delete", use_container_width=True
+                    )
 
                 if save_clicked:
                     try:
-                        db.update_relation(rel['id'], left_column=new_left_col, right_column=new_right_col)
+                        db.update_relation(
+                            rel["id"],
+                            left_column=new_left_col,
+                            right_column=new_right_col,
+                        )
                         st.success("Updated relation")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
 
                 if delete_clicked:
-                    db.delete_relation(rel['id'])
+                    db.delete_relation(rel["id"])
                     st.success("Deleted relation")
                     st.rerun()
 
 
 def main():
-    st.markdown('<h1 class="main-header">Cube Model Visualizer</h1>', unsafe_allow_html=True)
+    st.markdown(
+        '<h1 class="main-header">Cube Model Visualizer</h1>', unsafe_allow_html=True
+    )
     st.markdown(
         '<p class="sub-header">Interactive visualization of database cubes and their relationships</p>',
         unsafe_allow_html=True,
@@ -384,12 +436,16 @@ def main():
                     st.markdown("**Outgoing Relations:**")
                     for rel in model.relations:
                         if rel.left_cube.name == selected_node:
-                            st.markdown(f"→ `{rel.right_cube.name}` via `{rel.left_column}` [{rel.cardinality.value}]")
+                            st.markdown(
+                                f"→ `{rel.right_cube.name}` via `{rel.left_column}` [{rel.cardinality.value}]"
+                            )
 
                     st.markdown("**Incoming Relations:**")
                     for rel in model.relations:
                         if rel.right_cube.name == selected_node:
-                            st.markdown(f"← `{rel.left_cube.name}` via `{rel.right_column}` [{rel.cardinality.value}]")
+                            st.markdown(
+                                f"← `{rel.left_cube.name}` via `{rel.right_column}` [{rel.cardinality.value}]"
+                            )
     else:
         st.info("No cubes yet. Add some using the sidebar!")
 
