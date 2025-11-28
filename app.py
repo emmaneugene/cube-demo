@@ -4,6 +4,7 @@ import streamlit as st
 from streamlit_agraph import Config, Edge, Node, agraph
 
 from cube_demo import Model, db
+from cube_demo.relation import Cardinality
 
 st.set_page_config(
     page_title="Cube Model Visualizer",
@@ -95,7 +96,7 @@ def model_to_agraph(model: Model) -> tuple[list[Node], list[Edge]]:
             Edge(
                 source=relation.left_cube.name,
                 target=relation.right_cube.name,
-                label=f"{relation.left_column} → {relation.right_column}",
+                label=f"{relation.left_column} → {relation.right_column}\n[{relation.cardinality.value}]",
                 color="#666666",
                 font={"size": 10, "color": "#333333", "strokeWidth": 0},
                 arrows="to",
@@ -217,12 +218,26 @@ def render_relation_editor(model: Model):
                         key="new_rel_right_col",
                     )
 
+                # Cardinality selection
+                cardinality_options = {
+                    "One-to-One (INNER JOIN)": Cardinality.ONE_TO_ONE,
+                    "One-to-Many (LEFT JOIN)": Cardinality.ONE_TO_MANY,
+                    "Many-to-One (RIGHT JOIN)": Cardinality.MANY_TO_ONE,
+                }
+                cardinality_label = st.selectbox(
+                    "Cardinality",
+                    options=list(cardinality_options.keys()),
+                    index=2,  # Default to Many-to-One (common for foreign keys)
+                    key="new_rel_cardinality",
+                )
+                cardinality = cardinality_options[cardinality_label]
+
                 # Submit button
                 if st.button("Add Relation", use_container_width=True, key="add_relation_btn"):
                     if left_cube_name and right_cube_name and left_column and right_column:
                         try:
-                            db.create_relation(left_cube_name, right_cube_name, left_column, right_column)
-                            st.success(f"Created relation: {left_cube_name}.{left_column} -> {right_cube_name}.{right_column}")
+                            db.create_relation(left_cube_name, right_cube_name, left_column, right_column, cardinality)
+                            st.success(f"Created relation: {left_cube_name}.{left_column} -> {right_cube_name}.{right_column} ({cardinality.value})")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error: {e}")
@@ -237,7 +252,7 @@ def render_relation_editor(model: Model):
     if relations_data:
         st.caption("Existing Relations")
     for rel in relations_data:
-        rel_label = f"{rel['left_cube']}.{rel['left_column']} → {rel['right_cube']}.{rel['right_column']}"
+        rel_label = f"{rel['left_cube']}.{rel['left_column']} → {rel['right_cube']}.{rel['right_column']} [{rel['cardinality'].value}]"
 
         with st.expander(f"{rel_label}", expanded=False):
             with st.form(f"edit_rel_{rel['id']}"):
@@ -369,12 +384,12 @@ def main():
                     st.markdown("**Outgoing Relations:**")
                     for rel in model.relations:
                         if rel.left_cube.name == selected_node:
-                            st.markdown(f"→ `{rel.right_cube.name}` via `{rel.left_column}`")
+                            st.markdown(f"→ `{rel.right_cube.name}` via `{rel.left_column}` [{rel.cardinality.value}]")
 
                     st.markdown("**Incoming Relations:**")
                     for rel in model.relations:
                         if rel.right_cube.name == selected_node:
-                            st.markdown(f"← `{rel.left_cube.name}` via `{rel.right_column}`")
+                            st.markdown(f"← `{rel.left_cube.name}` via `{rel.right_column}` [{rel.cardinality.value}]")
     else:
         st.info("No cubes yet. Add some using the sidebar!")
 

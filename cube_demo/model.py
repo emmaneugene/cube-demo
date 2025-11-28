@@ -2,16 +2,21 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from cube_demo.cube import Cube
-from cube_demo.relation import Relation
+from cube_demo.relation import Cardinality, Relation
 
 
 @dataclass
 class Model:
-    """Stores cubes and their relations to each other."""
+    """Stores cubes and their relations to each other as a DAG."""
 
     name: str = "Model"
     cubes: dict[str, Cube] = field(default_factory=dict)
-    relations: set[Relation] = field(default_factory=set)
+    _adjacency: dict[str, list[Relation]] = field(default_factory=dict)
+
+    @property
+    def relations(self) -> set[Relation]:
+        """Returns all relations as a flat set."""
+        return {rel for rels in self._adjacency.values() for rel in rels}
 
     def add_cube(self, cube: Cube) -> None:
         """Add a cube to the model."""
@@ -25,29 +30,106 @@ class Model:
             raise KeyError(f"Cube '{name}' not found in model")
         return self.cubes[name]
 
+    def get_root_cubes(self) -> list[str]:
+        """Returns cubes with no incoming edges (source cubes)."""
+        # Find all cubes that are targets of relations
+        cubes_with_incoming: set[str] = set()
+        for rels in self._adjacency.values():
+            for rel in rels:
+                cubes_with_incoming.add(rel.right_cube.name)
+
+        # Return cubes that have no incoming edges
+        return [name for name in self.cubes if name not in cubes_with_incoming]
+
+    def topological_sort(self) -> list[str]:
+        """Returns cubes in topological order (dependencies first).
+
+        Uses Kahn's algorithm.
+        """
+        # Calculate in-degree for each cube
+        in_degree: dict[str, int] = {name: 0 for name in self.cubes}
+        for rels in self._adjacency.values():
+            for rel in rels:
+                in_degree[rel.right_cube.name] += 1
+
+        # Start with cubes that have no incoming edges
+        queue = [name for name in self.cubes if in_degree[name] == 0]
+        result: list[str] = []
+
+        while queue:
+            current = queue.pop(0)
+            result.append(current)
+
+            # Reduce in-degree for neighbors
+            for rel in self._adjacency.get(current, []):
+                neighbor = rel.right_cube.name
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+
+        return result
+
+    def _would_create_cycle(self, from_cube: str, to_cube: str) -> bool:
+        """Check if adding an edge from from_cube to to_cube would create a cycle."""
+        # If adding edge A -> B, check if B can reach A (which would create a cycle)
+        visited: set[str] = set()
+        stack = [to_cube]
+
+        while stack:
+            current = stack.pop()
+            if current == from_cube:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            # Follow outgoing edges
+            for rel in self._adjacency.get(current, []):
+                stack.append(rel.right_cube.name)
+
+        return False
+
     def add_relation(self, relation: Relation) -> None:
-        """Add a relation between two cubes."""
-        if relation.left_cube.name not in self.cubes:
+        """Add a relation between two cubes.
+
+        Raises ValueError if the relation would create a cycle in the DAG.
+        """
+        left_name = relation.left_cube.name
+        right_name = relation.right_cube.name
+
+        if left_name not in self.cubes:
+            raise ValueError(f"Left cube '{left_name}' not found in model")
+        if right_name not in self.cubes:
+            raise ValueError(f"Right cube '{right_name}' not found in model")
+
+        # Check for cycle
+        if self._would_create_cycle(left_name, right_name):
             raise ValueError(
-                f"Left cube '{relation.left_cube.name}' not found in model"
+                f"Adding relation {left_name} -> {right_name} would create a cycle"
             )
-        if relation.right_cube.name not in self.cubes:
-            raise ValueError(
-                f"Right cube '{relation.right_cube.name}' not found in model"
-            )
-        self.relations.add(relation)
+
+        # Add to adjacency list
+        if left_name not in self._adjacency:
+            self._adjacency[left_name] = []
+        self._adjacency[left_name].append(relation)
 
     def remove_cube(self, name: str) -> bool:
         """Remove a cube and all relations referencing it."""
         if name not in self.cubes:
             return False
 
-        # Remove all relations involving this cube
-        self.relations = {
-            rel
-            for rel in self.relations
-            if rel.left_cube.name != name and rel.right_cube.name != name
-        }
+        # Remove outgoing relations from this cube
+        if name in self._adjacency:
+            del self._adjacency[name]
+
+        # Remove incoming relations to this cube from all other cubes
+        for source in list(self._adjacency.keys()):
+            self._adjacency[source] = [
+                rel for rel in self._adjacency[source]
+                if rel.right_cube.name != name
+            ]
+            # Clean up empty lists
+            if not self._adjacency[source]:
+                del self._adjacency[source]
 
         # Remove the cube
         del self.cubes[name]
@@ -76,22 +158,36 @@ class Model:
 
         self.cubes[name].columns = columns
 
-        # Remove relations with invalid columns
-        self.relations = {
-            rel
-            for rel in self.relations
-            if (
-                (rel.left_cube.name != name or rel.left_column in columns)
-                and (rel.right_cube.name != name or rel.right_column in columns)
-            )
-        }
+        # Remove relations with invalid columns from all adjacency lists
+        for source in list(self._adjacency.keys()):
+            self._adjacency[source] = [
+                rel for rel in self._adjacency[source]
+                if (
+                    (rel.left_cube.name != name or rel.left_column in columns)
+                    and (rel.right_cube.name != name or rel.right_column in columns)
+                )
+            ]
+            # Clean up empty lists
+            if not self._adjacency[source]:
+                del self._adjacency[source]
 
         return True
 
     def remove_relation(self, relation: Relation) -> bool:
         """Remove a relation from the model."""
-        if relation in self.relations:
-            self.relations.discard(relation)
+        left_name = relation.left_cube.name
+        if left_name not in self._adjacency:
+            return False
+
+        original_len = len(self._adjacency[left_name])
+        self._adjacency[left_name] = [
+            rel for rel in self._adjacency[left_name] if rel != relation
+        ]
+
+        if len(self._adjacency[left_name]) < original_len:
+            # Clean up empty lists
+            if not self._adjacency[left_name]:
+                del self._adjacency[left_name]
             return True
         return False
 
@@ -102,7 +198,8 @@ class Model:
         right_column: str | None = None,
     ) -> bool:
         """Update a relation's column mappings by replacing it."""
-        if old_relation not in self.relations:
+        left_name = old_relation.left_cube.name
+        if left_name not in self._adjacency or old_relation not in self._adjacency[left_name]:
             return False
 
         new_left_col = left_column if left_column is not None else old_relation.left_column
@@ -117,15 +214,20 @@ class Model:
                 f"Column '{new_right_col}' not in cube '{old_relation.right_cube.name}'"
             )
 
-        # Remove old and add new (since relations are hashable, we can't mutate in place)
-        self.relations.discard(old_relation)
+        # Remove old relation
+        self._adjacency[left_name] = [
+            rel for rel in self._adjacency[left_name] if rel != old_relation
+        ]
+
+        # Add new relation (preserving cardinality)
         new_relation = Relation(
             left_cube=old_relation.left_cube,
             right_cube=old_relation.right_cube,
             left_column=new_left_col,
             right_column=new_right_col,
+            cardinality=old_relation.cardinality,
         )
-        self.relations.add(new_relation)
+        self._adjacency[left_name].append(new_relation)
         return True
 
     def to_graph_data(self) -> dict[str, Any]:
@@ -151,7 +253,8 @@ class Model:
                     "id": f"edge_{i}",
                     "source": relation.left_cube.name,
                     "target": relation.right_cube.name,
-                    "label": f"{relation.left_column} → {relation.right_column}",
+                    "label": f"{relation.left_column} → {relation.right_column} [{relation.cardinality.value}]",
+                    "cardinality": relation.cardinality.value,
                 }
             )
 
@@ -191,37 +294,47 @@ class Model:
             cols = ", ".join(f"{cube_name}.{c}" for c in columns_by_cube[cube_name])
             return f"SELECT {cols}\nFROM {cube_name}"
 
-        # Build adjacency graph from relations
-        # Each entry: (neighbor, left_cube, left_col, right_cube, right_col)
-        adjacency: dict[str, list[tuple[str, str, str, str, str]]] = {
+        # Build directed adjacency graph from relations (only left → right)
+        # Each entry: (target, left_col, right_col, cardinality)
+        adjacency: dict[str, list[tuple[str, str, str, Cardinality]]] = {
             name: [] for name in self.cubes
         }
         for rel in self.relations:
             left = rel.left_cube.name
             right = rel.right_cube.name
-            # Bidirectional for pathfinding
-            adjacency[left].append((right, left, rel.left_column, right, rel.right_column))
-            adjacency[right].append((left, left, rel.left_column, right, rel.right_column))
+            # Only forward direction (respecting DAG)
+            adjacency[left].append((right, rel.left_column, rel.right_column, rel.cardinality))
 
-        # BFS to find path connecting all involved cubes
-        # Start from first involved cube and find paths to all others
-        start_cube = involved_cubes[0]
+        # Find the best starting cube among involved cubes
+        # Prefer a cube that is a root (no incoming edges from other involved cubes)
+        involved_set = set(involved_cubes)
+        cubes_with_incoming: set[str] = set()
+        for cube in involved_cubes:
+            for target, _, _, _ in adjacency[cube]:
+                if target in involved_set:
+                    cubes_with_incoming.add(target)
+
+        # Start from a root cube if possible, otherwise first involved cube
+        root_candidates = [c for c in involved_cubes if c not in cubes_with_incoming]
+        start_cube = root_candidates[0] if root_candidates else involved_cubes[0]
+
+        # BFS to find paths following directed edges only
         visited = {start_cube}
         queue = [start_cube]
-        parent: dict[str, tuple[str, str, str, str, str] | None] = {start_cube: None}
+        parent: dict[str, tuple[str, str, str, Cardinality] | None] = {start_cube: None}
 
         while queue:
             current = queue.pop(0)
-            for neighbor, left_cube, left_col, right_cube, right_col in adjacency[current]:
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    parent[neighbor] = (current, left_cube, left_col, right_cube, right_col)
-                    queue.append(neighbor)
+            for target, left_col, right_col, cardinality in adjacency[current]:
+                if target not in visited:
+                    visited.add(target)
+                    parent[target] = (current, left_col, right_col, cardinality)
+                    queue.append(target)
 
-        # Check if all involved cubes are reachable
+        # Check if all involved cubes are reachable via directed paths
         for cube_name in involved_cubes:
             if cube_name not in visited:
-                return f"Error: Cannot connect cube '{cube_name}' - no path exists"
+                return f"Error: Cannot connect cube '{cube_name}' - no directed path exists from '{start_cube}'"
 
         # Reconstruct joins needed to connect all involved cubes
         cubes_to_join = set(involved_cubes)
@@ -229,31 +342,38 @@ class Model:
         joined_cubes = {start_cube}
         join_clauses = []
 
+        # Map cardinality to SQL JOIN type
+        def get_join_type(cardinality: Cardinality) -> str:
+            match cardinality:
+                case Cardinality.ONE_TO_ONE:
+                    return "INNER JOIN"
+                case Cardinality.ONE_TO_MANY:
+                    return "LEFT JOIN"
+                case Cardinality.MANY_TO_ONE:
+                    return "RIGHT JOIN"
+
         # For each cube we need, trace back to find the join path
         for target in list(cubes_to_join):
-            path = []
+            # path entries: (from_cube, to_cube, left_col, right_col, cardinality)
+            path: list[tuple[str, str, str, str, Cardinality]] = []
             current = target
             while current != start_cube and current not in joined_cubes:
                 p = parent.get(current)
                 if p is None:
                     break
-                prev, left_cube, left_col, right_cube, right_col = p
-                path.append((left_cube, left_col, right_cube, right_col))
+                prev, left_col, right_col, cardinality = p
+                # Edge goes from prev -> current
+                path.append((prev, current, left_col, right_col, cardinality))
                 current = prev
 
             # Add joins in reverse order (from joined cube toward target)
-            for left_cube, left_col, right_cube, right_col in reversed(path):
-                # Determine which side is already joined
-                if left_cube in joined_cubes and right_cube not in joined_cubes:
+            for from_cube, to_cube, left_col, right_col, cardinality in reversed(path):
+                if to_cube not in joined_cubes:
+                    join_type = get_join_type(cardinality)
                     join_clauses.append(
-                        f"JOIN {right_cube} ON {left_cube}.{left_col} = {right_cube}.{right_col}"
+                        f"{join_type} {to_cube} ON {from_cube}.{left_col} = {to_cube}.{right_col}"
                     )
-                    joined_cubes.add(right_cube)
-                elif right_cube in joined_cubes and left_cube not in joined_cubes:
-                    join_clauses.append(
-                        f"JOIN {left_cube} ON {left_cube}.{left_col} = {right_cube}.{right_col}"
-                    )
-                    joined_cubes.add(left_cube)
+                    joined_cubes.add(to_cube)
 
         # Build SELECT clause
         select_cols = ", ".join(selected_columns)

@@ -1,6 +1,15 @@
 from dataclasses import dataclass
+from enum import Enum
 
 from cube_demo.cube import Cube
+
+
+class Cardinality(Enum):
+    """Represents the cardinality of a relation between two cubes."""
+
+    ONE_TO_ONE = "one-to-one"  # INNER JOIN
+    ONE_TO_MANY = "one-to-many"  # LEFT JOIN
+    MANY_TO_ONE = "many-to-one"  # RIGHT JOIN
 
 
 @dataclass(eq=False)
@@ -14,6 +23,7 @@ class Relation:
     right_cube: Cube
     left_column: str
     right_column: str
+    cardinality: Cardinality
 
     def __post_init__(self) -> None:
         if self.left_column not in self.left_cube.columns:
@@ -43,5 +53,5 @@ class Relation:
     @property
     def label(self) -> str:
         """Returns a label describing the join."""
-        return f"{self.left_cube.name}.{self.left_column} → {self.right_cube.name}.{self.right_column}"
+        return f"{self.left_cube.name}.{self.left_column} → {self.right_cube.name}.{self.right_column} ({self.cardinality.value})"
 

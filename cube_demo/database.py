@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from cube_demo.cube import Cube
-from cube_demo.relation import Relation
+from cube_demo.relation import Cardinality, Relation
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "cube_model.db"
 
@@ -36,6 +36,7 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             right_cube TEXT NOT NULL,
             left_column TEXT NOT NULL,
             right_column TEXT NOT NULL,
+            cardinality TEXT NOT NULL DEFAULT 'one-to-many',
             FOREIGN KEY (left_cube) REFERENCES cubes(name) ON DELETE CASCADE,
             FOREIGN KEY (right_cube) REFERENCES cubes(name) ON DELETE CASCADE
         )
@@ -70,17 +71,17 @@ def init_sample_data(db_path: Path = DEFAULT_DB_PATH) -> None:
             (name, json.dumps(columns)),
         )
 
-    # Sample relations
+    # Sample relations (left_cube, right_cube, left_col, right_col, cardinality)
     sample_relations = [
-        ("orders", "customers", "customer_id", "id"),
-        ("order_items", "orders", "order_id", "id"),
-        ("order_items", "products", "product_id", "id"),
+        ("orders", "customers", "customer_id", "id", Cardinality.MANY_TO_ONE),
+        ("order_items", "orders", "order_id", "id", Cardinality.MANY_TO_ONE),
+        ("order_items", "products", "product_id", "id", Cardinality.MANY_TO_ONE),
     ]
 
-    for left_cube, right_cube, left_col, right_col in sample_relations:
+    for left_cube, right_cube, left_col, right_col, cardinality in sample_relations:
         cursor.execute(
-            "INSERT INTO relations (left_cube, right_cube, left_column, right_column) VALUES (?, ?, ?, ?)",
-            (left_cube, right_cube, left_col, right_col),
+            "INSERT INTO relations (left_cube, right_cube, left_column, right_column, cardinality) VALUES (?, ?, ?, ?, ?)",
+            (left_cube, right_cube, left_col, right_col, cardinality.value),
         )
 
     conn.commit()
@@ -209,6 +210,7 @@ def create_relation(
     right_cube: str,
     left_column: str,
     right_column: str,
+    cardinality: Cardinality,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> int | None:
     """Create a new relation in the database. Returns the relation ID."""
@@ -216,8 +218,8 @@ def create_relation(
     cursor = conn.cursor()
 
     cursor.execute(
-        "INSERT INTO relations (left_cube, right_cube, left_column, right_column) VALUES (?, ?, ?, ?)",
-        (left_cube, right_cube, left_column, right_column),
+        "INSERT INTO relations (left_cube, right_cube, left_column, right_column, cardinality) VALUES (?, ?, ?, ?, ?)",
+        (left_cube, right_cube, left_column, right_column, cardinality.value),
     )
 
     relation_id = cursor.lastrowid
@@ -233,7 +235,7 @@ def get_all_relations(db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT id, left_cube, right_cube, left_column, right_column
+        SELECT id, left_cube, right_cube, left_column, right_column, cardinality
         FROM relations
         ORDER BY id
     """)
@@ -247,6 +249,7 @@ def get_all_relations(db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
             "right_cube": row["right_cube"],
             "left_column": row["left_column"],
             "right_column": row["right_column"],
+            "cardinality": Cardinality(row["cardinality"]),
         }
         for row in rows
     ]
@@ -256,9 +259,10 @@ def update_relation(
     relation_id: int,
     left_column: str | None = None,
     right_column: str | None = None,
+    cardinality: Cardinality | None = None,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> bool:
-    """Update a relation's column mappings."""
+    """Update a relation's column mappings and/or cardinality."""
     conn = get_connection(db_path)
     cursor = conn.cursor()
 
@@ -272,6 +276,10 @@ def update_relation(
     if right_column is not None:
         updates.append("right_column = ?")
         params.append(right_column)
+
+    if cardinality is not None:
+        updates.append("cardinality = ?")
+        params.append(cardinality.value)
 
     if not updates:
         conn.close()
@@ -331,10 +339,11 @@ def load_model_from_db(db_path: Path = DEFAULT_DB_PATH):
                     right_cube=right_cube,
                     left_column=rel_data["left_column"],
                     right_column=rel_data["right_column"],
+                    cardinality=rel_data["cardinality"],
                 )
-                model.relations.add(relation)
+                model.add_relation(relation)
             except ValueError:
-                # Skip invalid relations (e.g., column no longer exists)
+                # Skip invalid relations (e.g., column no longer exists, or would create cycle)
                 pass
 
     return model
