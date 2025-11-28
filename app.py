@@ -391,6 +391,39 @@ def main():
         physics_enabled = st.checkbox("Enable Physics", value=False)
         hierarchical = st.checkbox("Hierarchical Layout", value=False)
 
+        st.markdown("---")
+        st.markdown("### 🔍 Model Inspector")
+
+        with st.expander("Cubes", expanded=False):
+            cubes_data = {
+                name: {"name": cube.name, "columns": cube.columns}
+                for name, cube in model.cubes.items()
+            }
+            st.json(cubes_data)
+
+        with st.expander("Adjacency List", expanded=False):
+            adj_data = {}
+            for source, rels in model.adjacency.items():
+                adj_data[source] = [
+                    {
+                        "left": f"{r.left_cube.name}.{r.left_column}",
+                        "right": f"{r.right_cube.name}.{r.right_column}",
+                        "cardinality": r.cardinality.value,
+                    }
+                    for r in rels
+                ]
+            st.json(adj_data)
+
+        with st.expander("Reachability", expanded=False):
+            st.caption("Shows which cubes can be queried from a starting cube along with JOIN count")
+            st.json(model.reachability)
+
+        with st.expander("All Reachability", expanded=False):
+            st.caption("Cubes that can be queried together")
+            # Convert sets to lists for JSON serialization
+            all_reach = {k: list(v) for k, v in model.all_reachability.items()}
+            st.json(all_reach)
+
     # Convert model to agraph format
     nodes, edges = model_to_agraph(model)
 

@@ -12,17 +12,17 @@ class Model:
 
     name: str = "Model"
     cubes: dict[str, Cube] = field(default_factory=dict)
-    _adjacency: dict[str, list[Relation]] = field(default_factory=dict)
+    adjacency: dict[str, list[Relation]] = field(default_factory=dict)
 
     @property
     def relations(self) -> set[Relation]:
         """Returns all relations as a flat set."""
-        return {rel for rels in self._adjacency.values() for rel in rels}
+        return {rel for rels in self.adjacency.values() for rel in rels}
 
     def _invalidate_reachability_cache(self) -> None:
         """Clear the cached reachability data."""
         self.__dict__.pop("reachability", None)
-        self.__dict__.pop("_all_reachability", None)
+        self.__dict__.pop("all_reachability", None)
 
     @cached_property
     def reachability(self) -> dict[str, dict[str, int]]:
@@ -44,7 +44,7 @@ class Model:
 
             while queue:
                 current, dist = queue.pop(0)
-                for rel in self._adjacency.get(current, []):
+                for rel in self.adjacency.get(current, []):
                     target = rel.right_cube.name
                     if target not in visited:
                         visited.add(target)
@@ -56,8 +56,8 @@ class Model:
         return result
 
     @cached_property
-    def _all_reachability(self) -> dict[str, set[str]]:
-        """For each cube, all cubes it can be queried with (bidirectional).
+    def all_reachability(self) -> dict[str, set[str]]:
+        """For each cube, all cubes it can be queried
 
         Derived from reachability: if A can reach B, then both A and B
         can be queried together.
@@ -68,9 +68,10 @@ class Model:
         result: dict[str, set[str]] = {name: set() for name in self.cubes}
 
         for cube_name, reachable in self.reachability.items():
-            for target in reachable:
-                result[cube_name].add(target)
-                result[target].add(cube_name)
+            connected_cubes = set(reachable.keys())
+            connected_cubes.add(cube_name)
+            for target in connected_cubes:
+                result[target] = result[target].union(connected_cubes)
 
         return result
 
@@ -91,7 +92,7 @@ class Model:
         """Returns cubes with no incoming edges (source cubes)."""
         # Find all cubes that are targets of relations
         cubes_with_incoming: set[str] = set()
-        for rels in self._adjacency.values():
+        for rels in self.adjacency.values():
             for rel in rels:
                 cubes_with_incoming.add(rel.right_cube.name)
 
@@ -105,7 +106,7 @@ class Model:
         """
         # Calculate in-degree for each cube
         in_degree: dict[str, int] = {name: 0 for name in self.cubes}
-        for rels in self._adjacency.values():
+        for rels in self.adjacency.values():
             for rel in rels:
                 in_degree[rel.right_cube.name] += 1
 
@@ -118,7 +119,7 @@ class Model:
             result.append(current)
 
             # Reduce in-degree for neighbors
-            for rel in self._adjacency.get(current, []):
+            for rel in self.adjacency.get(current, []):
                 neighbor = rel.right_cube.name
                 in_degree[neighbor] -= 1
                 if in_degree[neighbor] == 0:
@@ -140,7 +141,7 @@ class Model:
                 continue
             visited.add(current)
             # Follow outgoing edges
-            for rel in self._adjacency.get(current, []):
+            for rel in self.adjacency.get(current, []):
                 stack.append(rel.right_cube.name)
 
         return False
@@ -165,9 +166,9 @@ class Model:
             )
 
         # Add to adjacency list
-        if left_name not in self._adjacency:
-            self._adjacency[left_name] = []
-        self._adjacency[left_name].append(relation)
+        if left_name not in self.adjacency:
+            self.adjacency[left_name] = []
+        self.adjacency[left_name].append(relation)
         self._invalidate_reachability_cache()
 
     def remove_cube(self, name: str) -> bool:
@@ -176,17 +177,17 @@ class Model:
             return False
 
         # Remove outgoing relations from this cube
-        if name in self._adjacency:
-            del self._adjacency[name]
+        if name in self.adjacency:
+            del self.adjacency[name]
 
         # Remove incoming relations to this cube from all other cubes
-        for source in list(self._adjacency.keys()):
-            self._adjacency[source] = [
-                rel for rel in self._adjacency[source] if rel.right_cube.name != name
+        for source in list(self.adjacency.keys()):
+            self.adjacency[source] = [
+                rel for rel in self.adjacency[source] if rel.right_cube.name != name
             ]
             # Clean up empty lists
-            if not self._adjacency[source]:
-                del self._adjacency[source]
+            if not self.adjacency[source]:
+                del self.adjacency[source]
 
         # Remove the cube
         del self.cubes[name]
@@ -218,18 +219,18 @@ class Model:
         self.cubes[name].columns = columns
 
         # Remove relations with invalid columns from all adjacency lists
-        for source in list(self._adjacency.keys()):
-            self._adjacency[source] = [
+        for source in list(self.adjacency.keys()):
+            self.adjacency[source] = [
                 rel
-                for rel in self._adjacency[source]
+                for rel in self.adjacency[source]
                 if (
                     (rel.left_cube.name != name or rel.left_column in columns)
                     and (rel.right_cube.name != name or rel.right_column in columns)
                 )
             ]
             # Clean up empty lists
-            if not self._adjacency[source]:
-                del self._adjacency[source]
+            if not self.adjacency[source]:
+                del self.adjacency[source]
 
         self._invalidate_reachability_cache()
         return True
@@ -237,18 +238,18 @@ class Model:
     def remove_relation(self, relation: Relation) -> bool:
         """Remove a relation from the model."""
         left_name = relation.left_cube.name
-        if left_name not in self._adjacency:
+        if left_name not in self.adjacency:
             return False
 
-        original_len = len(self._adjacency[left_name])
-        self._adjacency[left_name] = [
-            rel for rel in self._adjacency[left_name] if rel != relation
+        original_len = len(self.adjacency[left_name])
+        self.adjacency[left_name] = [
+            rel for rel in self.adjacency[left_name] if rel != relation
         ]
 
-        if len(self._adjacency[left_name]) < original_len:
+        if len(self.adjacency[left_name]) < original_len:
             # Clean up empty lists
-            if not self._adjacency[left_name]:
-                del self._adjacency[left_name]
+            if not self.adjacency[left_name]:
+                del self.adjacency[left_name]
             self._invalidate_reachability_cache()
             return True
         return False
@@ -262,8 +263,8 @@ class Model:
         """Update a relation's column mappings by replacing it."""
         left_name = old_relation.left_cube.name
         if (
-            left_name not in self._adjacency
-            or old_relation not in self._adjacency[left_name]
+            left_name not in self.adjacency
+            or old_relation not in self.adjacency[left_name]
         ):
             return False
 
@@ -284,8 +285,8 @@ class Model:
             )
 
         # Remove old relation
-        self._adjacency[left_name] = [
-            rel for rel in self._adjacency[left_name] if rel != old_relation
+        self.adjacency[left_name] = [
+            rel for rel in self.adjacency[left_name] if rel != old_relation
         ]
 
         # Add new relation (preserving cardinality)
@@ -296,7 +297,7 @@ class Model:
             right_column=new_right_col,
             cardinality=old_relation.cardinality,
         )
-        self._adjacency[left_name].append(new_relation)
+        self.adjacency[left_name].append(new_relation)
         self._invalidate_reachability_cache()
         return True
 
