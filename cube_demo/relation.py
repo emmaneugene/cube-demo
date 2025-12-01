@@ -7,9 +7,20 @@ from cube_demo.cube import Cube
 class Cardinality(Enum):
     """Represents the cardinality of a relation between two cubes."""
 
-    ONE_TO_ONE = "one-to-one"  # INNER JOIN
-    ONE_TO_MANY = "one-to-many"  # LEFT JOIN
-    MANY_TO_ONE = "many-to-one"  # RIGHT JOIN
+    ONE_TO_ONE = "one-to-one"
+    ONE_TO_MANY = "one-to-many"
+    MANY_TO_ONE = "many-to-one"
+
+    @property
+    def sql_join(self) -> str:
+        """Returns the SQL JOIN type for this cardinality."""
+        match self:
+            case Cardinality.ONE_TO_ONE:
+                return "INNER JOIN"
+            case Cardinality.ONE_TO_MANY:
+                return "LEFT JOIN"
+            case Cardinality.MANY_TO_ONE:
+                return "RIGHT JOIN"
 
 
 @dataclass(eq=False)

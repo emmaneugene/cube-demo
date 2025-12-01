@@ -415,7 +415,9 @@ def main():
             st.json(adj_data)
 
         with st.expander("Reachability", expanded=False):
-            st.caption("Shows which cubes can be queried from a starting cube along with JOIN count")
+            st.caption(
+                "Shows which cubes can be queried from a starting cube along with JOIN count"
+            )
             st.json(model.reachability)
 
         with st.expander("All Reachability", expanded=False):

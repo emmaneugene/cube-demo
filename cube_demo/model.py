@@ -348,7 +348,7 @@ class Model:
             return "Error: No columns selected"
 
         # Parse selected columns to get cube names
-        columns_by_cube: dict[str, list[str]] = {}
+        cube_columns_selected: dict[str, list[str]] = {}
         for col_ref in selected_columns:
             if "." not in col_ref:
                 return f"Error: Invalid column format: {col_ref}"
@@ -357,51 +357,33 @@ class Model:
                 return f"Error: Cube '{cube_name}' not found"
             if col_name not in self.cubes[cube_name].columns:
                 return f"Error: Column '{col_name}' not found in cube '{cube_name}'"
-            if cube_name not in columns_by_cube:
-                columns_by_cube[cube_name] = []
-            columns_by_cube[cube_name].append(col_name)
+            if cube_name not in cube_columns_selected:
+                cube_columns_selected[cube_name] = []
+            cube_columns_selected[cube_name].append(col_name)
 
-        involved_cubes = set(columns_by_cube.keys())
+        needed_cubes = set(cube_columns_selected.keys())
 
-        # If only one cube, no JOINs needed - return all columns from that cube
-        if len(involved_cubes) == 1:
-            cube_name = next(iter(involved_cubes))
+        # If only one cube, no JOINs needed
+        if len(needed_cubes) == 1:
+            cube_name = next(iter(needed_cubes))
             cols = ", ".join(f"{cube_name}.{c}" for c in self.cubes[cube_name].columns)
             return f"SELECT {cols}\nFROM {cube_name}"
 
-        # Build directed adjacency graph from relations (only left → right)
-        # Each entry: (target, left_col, right_col, cardinality)
-        adjacency: dict[str, list[tuple[str, str, str, Cardinality]]] = {
-            name: [] for name in self.cubes
-        }
-        for rel in self.relations:
-            left = rel.left_cube.name
-            right = rel.right_cube.name
-            adjacency[left].append(
-                (right, rel.left_column, rel.right_column, rel.cardinality)
-            )
-
         # Find all candidate starting cubes that can reach all involved cubes
         reachability = self.reachability
-        candidates: list[str] = []
+        candidates: list[tuple(str, int)] = []
         for cube_name, reachable in reachability.items():
-            other_cubes = involved_cubes - {cube_name}
+            other_cubes = needed_cubes - {cube_name}
             if other_cubes <= set(reachable.keys()):
-                candidates.append(cube_name)
+                candidates.append(
+                    (cube_name, sum(reachable.get(cube, 0) for cube in other_cubes))
+                )
 
         if not candidates:
             return "Error: No cube can reach all selected cubes. Check reachability."
 
-        # Use distances to find candidate with minimum total joins
-        def count_joins(candidate: str) -> int:
-            """Sum distances to all involved cubes using reachability."""
-            distances = reachability.get(candidate, {})
-            return sum(
-                distances.get(cube, 0) for cube in involved_cubes if cube != candidate
-            )
-
         # Select the candidate with the minimum total joins
-        start_cube = min(candidates, key=count_joins)
+        start_cube = min(candidates, key=lambda x: x[1])[0]
 
         # BFS to find paths from start_cube following directed edges
         visited = {start_cube}
@@ -410,26 +392,22 @@ class Model:
 
         while queue:
             current = queue.pop(0)
-            for target, left_col, right_col, cardinality in adjacency[current]:
+            for rel in self.adjacency.get(current, []):
+                target = rel.right_cube.name
                 if target not in visited:
                     visited.add(target)
-                    parent[target] = (current, left_col, right_col, cardinality)
+                    parent[target] = (
+                        current,
+                        rel.left_column,
+                        rel.right_column,
+                        rel.cardinality,
+                    )
                     queue.append(target)
 
-        # Determine which cubes need to be joined (all involved cubes except start)
-        cubes_to_join = involved_cubes - {start_cube}
+        # Trace path for cubes to be joined
+        cubes_to_join = needed_cubes - {start_cube}
         joined_cubes = {start_cube}
         join_clauses: list[str] = []
-
-        # Map cardinality to SQL JOIN type
-        def get_join_type(cardinality: Cardinality) -> str:
-            match cardinality:
-                case Cardinality.ONE_TO_ONE:
-                    return "INNER JOIN"
-                case Cardinality.ONE_TO_MANY:
-                    return "LEFT JOIN"
-                case Cardinality.MANY_TO_ONE:
-                    return "RIGHT JOIN"
 
         # For each cube we need, trace back to find the join path
         for target in list(cubes_to_join):
@@ -447,32 +425,18 @@ class Model:
             # Add joins in reverse order (from joined cube toward target)
             for from_cube, to_cube, left_col, right_col, cardinality in reversed(path):
                 if to_cube not in joined_cubes:
-                    join_type = get_join_type(cardinality)
                     join_clauses.append(
-                        f"{join_type} {to_cube} ON {from_cube}.{left_col} = {to_cube}.{right_col}"
+                        f"{cardinality.sql_join} {to_cube} ON {from_cube}.{left_col} = {to_cube}.{right_col}"
                     )
                     joined_cubes.add(to_cube)
 
-        # Build SELECT clause: all columns from start_cube + selected columns from other cubes
-        select_parts: list[str] = []
-
-        # Add all columns from the starting cube
-        for col in self.cubes[start_cube].columns:
-            select_parts.append(f"{start_cube}.{col}")
-
-        # Add selected columns from other cubes (avoiding duplicates)
-        start_cube_cols = {f"{start_cube}.{c}" for c in self.cubes[start_cube].columns}
-        for col_ref in selected_columns:
-            if col_ref not in start_cube_cols:
-                select_parts.append(col_ref)
-
-        select_cols = ", ".join(select_parts)
-
-        # Build FROM clause
-        from_clause = f"FROM {start_cube}"
+        print(f"Join clauses: {join_clauses}")
 
         # Combine
-        sql_parts = [f"SELECT {select_cols}", from_clause]
-        sql_parts.extend(join_clauses)
+        sql_parts = [
+            f"SELECT {', '.join(selected_columns)}",
+            f"FROM {start_cube}",
+            *join_clauses,
+        ]
 
         return "\n".join(sql_parts)
