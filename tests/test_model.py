@@ -3,6 +3,7 @@
 import pytest
 
 from cube_demo import Cube, Model, Relation
+from cube_demo.relation import Cardinality
 
 
 class TestCube:
@@ -41,12 +42,14 @@ class TestRelation:
             right_cube=customers,
             left_column="customer_id",
             right_column="id",
+            cardinality=Cardinality.MANY_TO_ONE,
         )
 
         assert relation.left_cube == orders
         assert relation.right_cube == customers
         assert relation.left_column == "customer_id"
         assert relation.right_column == "id"
+        assert relation.cardinality == Cardinality.MANY_TO_ONE
 
     def test_relation_label(self):
         customers = Cube(name="customers", columns=["id", "name"])
@@ -57,9 +60,10 @@ class TestRelation:
             right_cube=customers,
             left_column="customer_id",
             right_column="id",
+            cardinality=Cardinality.MANY_TO_ONE,
         )
 
-        assert relation.label == "orders.customer_id → customers.id"
+        assert relation.label == "orders.customer_id → customers.id (many-to-one)"
 
     def test_relation_invalid_left_column(self):
         customers = Cube(name="customers", columns=["id", "name"])
@@ -73,6 +77,7 @@ class TestRelation:
                 right_cube=customers,
                 left_column="invalid",
                 right_column="id",
+                cardinality=Cardinality.MANY_TO_ONE,
             )
 
     def test_relation_invalid_right_column(self):
@@ -87,6 +92,7 @@ class TestRelation:
                 right_cube=customers,
                 left_column="customer_id",
                 right_column="invalid",
+                cardinality=Cardinality.MANY_TO_ONE,
             )
 
 
@@ -141,6 +147,7 @@ class TestModel:
             right_cube=customers,
             left_column="customer_id",
             right_column="id",
+            cardinality=Cardinality.MANY_TO_ONE,
         )
         model.add_relation(relation)
 
@@ -159,6 +166,7 @@ class TestModel:
             right_cube=customers,
             left_column="customer_id",
             right_column="id",
+            cardinality=Cardinality.MANY_TO_ONE,
         )
 
         with pytest.raises(ValueError, match="Left cube 'orders' not found"):
@@ -181,6 +189,7 @@ class TestModel:
                 right_cube=customers,
                 left_column="customer_id",
                 right_column="id",
+                cardinality=Cardinality.MANY_TO_ONE,
             )
         )
 
@@ -199,7 +208,7 @@ class TestModel:
         edge = graph_data["edges"][0]
         assert edge["source"] == "orders"
         assert edge["target"] == "customers"
-        assert edge["label"] == "customer_id → id"
+        assert edge["label"] == "customer_id → id [many-to-one]"
 
 
 class TestIntegration:
@@ -232,9 +241,9 @@ class TestIntegration:
             model.add_cube(cube)
 
         # Create relations
-        model.add_relation(Relation(orders, customers, "customer_id", "id"))
-        model.add_relation(Relation(order_items, orders, "order_id", "id"))
-        model.add_relation(Relation(order_items, products, "product_id", "id"))
+        model.add_relation(Relation(orders, customers, "customer_id", "id", Cardinality.MANY_TO_ONE))
+        model.add_relation(Relation(order_items, orders, "order_id", "id", Cardinality.MANY_TO_ONE))
+        model.add_relation(Relation(order_items, products, "product_id", "id", Cardinality.MANY_TO_ONE))
 
         # Verify model structure
         assert len(model.cubes) == 4
