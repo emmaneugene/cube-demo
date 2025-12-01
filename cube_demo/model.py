@@ -7,6 +7,21 @@ from cube_demo.relation import Cardinality, Relation
 
 
 @dataclass
+class Join:
+    """Represents a SQL JOIN clause between two cubes."""
+
+    from_cube: str
+    to_cube: str
+    left_column: str
+    right_column: str
+    cardinality: Cardinality
+
+    def to_sql(self) -> str:
+        """Generate the SQL JOIN clause."""
+        return f"{self.cardinality.sql_join} {self.to_cube} ON {self.from_cube}.{self.left_column} = {self.to_cube}.{self.right_column}"
+
+
+@dataclass
 class Model:
     """Stores cubes and their relations to each other as a DAG."""
 
@@ -19,7 +34,7 @@ class Model:
         """Returns all relations as a flat set."""
         return {rel for rels in self.adjacency.values() for rel in rels}
 
-    def _invalidate_reachability_cache(self) -> None:
+    def _invalidate_reachability_caches(self) -> None:
         """Clear the cached reachability data."""
         self.__dict__.pop("reachability", None)
         self.__dict__.pop("all_reachability", None)
@@ -80,7 +95,7 @@ class Model:
         if cube.name in self.cubes:
             raise ValueError(f"Cube '{cube.name}' already exists in model")
         self.cubes[cube.name] = cube
-        self._invalidate_reachability_cache()
+        self._invalidate_reachability_caches()
 
     def get_cube(self, name: str) -> Cube:
         """Get a cube by name."""
@@ -169,7 +184,7 @@ class Model:
         if left_name not in self.adjacency:
             self.adjacency[left_name] = []
         self.adjacency[left_name].append(relation)
-        self._invalidate_reachability_cache()
+        self._invalidate_reachability_caches()
 
     def remove_cube(self, name: str) -> bool:
         """Remove a cube and all relations referencing it."""
@@ -191,7 +206,7 @@ class Model:
 
         # Remove the cube
         del self.cubes[name]
-        self._invalidate_reachability_cache()
+        self._invalidate_reachability_caches()
         return True
 
     def rename_cube(self, old_name: str, new_name: str) -> bool:
@@ -207,7 +222,7 @@ class Model:
         # Update cubes dict
         del self.cubes[old_name]
         self.cubes[new_name] = cube
-        self._invalidate_reachability_cache()
+        self._invalidate_reachability_caches()
 
         return True
 
@@ -232,7 +247,7 @@ class Model:
             if not self.adjacency[source]:
                 del self.adjacency[source]
 
-        self._invalidate_reachability_cache()
+        self._invalidate_reachability_caches()
         return True
 
     def remove_relation(self, relation: Relation) -> bool:
@@ -250,7 +265,7 @@ class Model:
             # Clean up empty lists
             if not self.adjacency[left_name]:
                 del self.adjacency[left_name]
-            self._invalidate_reachability_cache()
+            self._invalidate_reachability_caches()
             return True
         return False
 
@@ -298,7 +313,7 @@ class Model:
             cardinality=old_relation.cardinality,
         )
         self.adjacency[left_name].append(new_relation)
-        self._invalidate_reachability_cache()
+        self._invalidate_reachability_caches()
         return True
 
     def to_graph_data(self) -> dict[str, Any]:
@@ -371,7 +386,7 @@ class Model:
 
         # Find all candidate starting cubes that can reach all involved cubes
         reachability = self.reachability
-        candidates: list[tuple(str, int)] = []
+        candidates: list[tuple[str, int]] = []
         for cube_name, reachable in reachability.items():
             other_cubes = needed_cubes - {cube_name}
             if other_cubes <= set(reachable.keys()):
@@ -385,10 +400,10 @@ class Model:
         # Select the candidate with the minimum total joins
         start_cube = min(candidates, key=lambda x: x[1])[0]
 
-        # BFS to find paths from start_cube following directed edges
+        # Do BFS from start_cube to find join paths
         visited = {start_cube}
         queue = [start_cube]
-        parent: dict[str, tuple[str, str, str, Cardinality] | None] = {start_cube: None}
+        join_to: dict[str, Join | None] = {start_cube: None}
 
         while queue:
             current = queue.pop(0)
@@ -396,11 +411,12 @@ class Model:
                 target = rel.right_cube.name
                 if target not in visited:
                     visited.add(target)
-                    parent[target] = (
-                        current,
-                        rel.left_column,
-                        rel.right_column,
-                        rel.cardinality,
+                    join_to[target] = Join(
+                        from_cube=current,
+                        to_cube=target,
+                        left_column=rel.left_column,
+                        right_column=rel.right_column,
+                        cardinality=rel.cardinality,
                     )
                     queue.append(target)
 
@@ -409,28 +425,29 @@ class Model:
         joined_cubes = {start_cube}
         join_clauses: list[str] = []
 
-        # For each cube we need, trace back to find the join path
+        # For each cube needed, trace back to find the join path
         for target in list(cubes_to_join):
-            # path entries: (from_cube, to_cube, left_col, right_col, cardinality)
-            path: list[tuple[str, str, str, str, Cardinality]] = []
+            print(f"Tracing path for {target}")
+            path: list[Join] = []
             current = target
             while current != start_cube and current not in joined_cubes:
-                p = parent.get(current)
-                if p is None:
+                join = join_to.get(current)
+                if join is None:
                     break
-                prev, left_col, right_col, cardinality = p
-                path.append((prev, current, left_col, right_col, cardinality))
-                current = prev
+                path.insert(0, join)
+                current = join.from_cube
 
-            # Add joins in reverse order (from joined cube toward target)
-            for from_cube, to_cube, left_col, right_col, cardinality in reversed(path):
-                if to_cube not in joined_cubes:
-                    join_clauses.append(
-                        f"{cardinality.sql_join} {to_cube} ON {from_cube}.{left_col} = {to_cube}.{right_col}"
-                    )
-                    joined_cubes.add(to_cube)
 
-        print(f"Join clauses: {join_clauses}")
+            print(f"Path for {target}:")
+            for join in path:
+                print(f"{join.from_cube} → ", end="")
+            print(f"{join.to_cube}")
+
+            for join in path:
+                if join.to_cube not in joined_cubes:
+                    join_clauses.append(join.to_sql())
+                    joined_cubes.add(join.to_cube)
+
 
         # Combine
         sql_parts = [
