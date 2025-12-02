@@ -2,8 +2,7 @@
 
 import pytest
 
-from cube_demo import Cube, Model, Relation
-from cube_demo.relation import Cardinality
+from cube_demo import Cardinality, Cube, Model, Relation
 
 
 class TestCube:

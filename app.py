@@ -3,8 +3,7 @@
 import streamlit as st
 from streamlit_agraph import Config, Edge, Node, agraph
 
-from cube_demo import Model, db
-from cube_demo.relation import Cardinality
+from cube_demo import Cardinality, Model, db
 
 st.set_page_config(
     page_title="Cube Model Visualizer",

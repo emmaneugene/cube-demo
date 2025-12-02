@@ -4,8 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from cube_demo.cube import Cube
-from cube_demo.relation import Cardinality, Relation
+from cube_demo.model import Cardinality, Cube, Relation
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "cube_model.db"
 
