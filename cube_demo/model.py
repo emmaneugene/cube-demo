@@ -246,15 +246,30 @@ class Model:
     def add_relation(self, relation: Relation) -> None:
         """Add a relation between two cubes.
 
-        Raises ValueError if the relation would create a cycle in the DAG.
+        Raises ValueError if:
+        - the relation would create a cycle in the DAG.
+        - the relation creates a duplicate path between any 2 cubes.
+        - the relation connects a cube to itself.
         """
         left_name = relation.left_cube.name
         right_name = relation.right_cube.name
+
+        # Check for self-relation
+        if left_name == right_name:
+            raise ValueError(
+                f"Cannot add relation: cube '{left_name}' cannot connect to itself"
+            )
 
         if left_name not in self.cubes:
             raise ValueError(f"Left cube '{left_name}' not found in model")
         if right_name not in self.cubes:
             raise ValueError(f"Right cube '{right_name}' not found in model")
+
+        # Check for duplicate path (if right_cube is already reachable from left_cube)
+        if right_name in self.reachability.get(left_name, {}):
+            raise ValueError(
+                f"Adding relation {left_name} -> {right_name} would create a duplicate path"
+            )
 
         # Check for cycle
         if self._would_create_cycle(left_name, right_name):

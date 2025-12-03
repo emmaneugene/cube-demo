@@ -171,6 +171,61 @@ class TestModel:
         with pytest.raises(ValueError, match="Left cube 'orders' not found"):
             model.add_relation(relation)
 
+    def test_add_relation_self_connection_raises_error(self):
+        """Raises ValueError if the relation connects a cube to itself."""
+        model = Model()
+        users = Cube(name="users", columns=["id", "manager_id"])
+        model.add_cube(users)
+
+        relation = Relation(
+            left_cube=users,
+            right_cube=users,
+            left_column="manager_id",
+            right_column="id",
+            cardinality=Cardinality.MANY_TO_ONE,
+        )
+
+        with pytest.raises(ValueError, match="cube 'users' cannot connect to itself"):
+            model.add_relation(relation)
+
+    def test_add_relation_cycle_raises_error(self):
+        """Raises ValueError if the relation would create a cycle in the DAG."""
+        model = Model()
+        a = Cube(name="a", columns=["id", "b_id"])
+        b = Cube(name="b", columns=["id", "c_id"])
+        c = Cube(name="c", columns=["id", "a_id"])
+
+        model.add_cube(a)
+        model.add_cube(b)
+        model.add_cube(c)
+
+        # Create chain: a -> b -> c
+        model.add_relation(Relation(a, b, "b_id", "id", Cardinality.MANY_TO_ONE))
+        model.add_relation(Relation(b, c, "c_id", "id", Cardinality.MANY_TO_ONE))
+
+        # Adding c -> a would create a cycle
+        with pytest.raises(ValueError, match="would create a cycle"):
+            model.add_relation(Relation(c, a, "a_id", "id", Cardinality.MANY_TO_ONE))
+
+    def test_add_relation_duplicate_path_raises_error(self):
+        """Raises ValueError if the relation creates a duplicate path between any 2 cubes."""
+        model = Model()
+        a = Cube(name="a", columns=["id", "b_id", "c_id"])
+        b = Cube(name="b", columns=["id", "c_id"])
+        c = Cube(name="c", columns=["id"])
+
+        model.add_cube(a)
+        model.add_cube(b)
+        model.add_cube(c)
+
+        # Create path: a -> b -> c
+        model.add_relation(Relation(a, b, "b_id", "id", Cardinality.MANY_TO_ONE))
+        model.add_relation(Relation(b, c, "c_id", "id", Cardinality.MANY_TO_ONE))
+
+        # Adding a -> c would create a duplicate path from a to c
+        with pytest.raises(ValueError, match="would create a duplicate path"):
+            model.add_relation(Relation(a, c, "c_id", "id", Cardinality.MANY_TO_ONE))
+
     def test_to_graph_data(self):
         model = Model(name="ecommerce")
 
