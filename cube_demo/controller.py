@@ -41,8 +41,11 @@ class ModelController:
         db.init_sample_data(self._db_path)
 
     def restore_sample_data(self) -> None:
+        """Delete all data and restore sample data."""
         db.delete_all_data(self._db_path)
         db.init_sample_data(self._db_path)
+        self.refresh()
+
     # Cube operations
 
     def create_cube(self, name: str, columns: list[str]) -> Cube:
@@ -95,9 +98,6 @@ class ModelController:
         # Persist to database
         result = db.update_cube(name, new_name, columns, self._db_path)
 
-        # Refresh model to sync with DB state
-        self.refresh()
-
         return result
 
     def delete_cube(self, name: str) -> bool:
@@ -116,6 +116,17 @@ class ModelController:
         return self.model.cubes.get(name)
 
     # Relation operations
+
+    def _find_relation_in_model(self, rel_data: RelationData) -> Relation | None:
+        """Find a relation in the model matching the database data."""
+        for rel in self.model.adjacency.get(rel_data.left_cube, []):
+            if (
+                rel.right_cube.name == rel_data.right_cube
+                and rel.left_column == rel_data.left_column
+                and rel.right_column == rel_data.right_column
+            ):
+                return rel
+        return None
 
     def create_relation(
         self,
@@ -188,23 +199,8 @@ class ModelController:
         if rel_data is None:
             return False
 
-        model = self.model
-        left_cube = model.cubes.get(rel_data.left_cube)
-        right_cube = model.cubes.get(rel_data.right_cube)
-
-        if left_cube is None or right_cube is None:
-            return False
-
         # Find the relation in the model
-        old_relation = None
-        for rel in model.adjacency.get(rel_data.left_cube, []):
-            if (
-                rel.right_cube.name == rel_data.right_cube
-                and rel.left_column == rel_data.left_column
-                and rel.right_column == rel_data.right_column
-            ):
-                old_relation = rel
-                break
+        old_relation = self._find_relation_in_model(rel_data)
 
         if old_relation is None:
             # Relation exists in DB but not in model (was invalid)
@@ -214,15 +210,12 @@ class ModelController:
             )
 
         # Validate through model
-        model.update_relation(old_relation, left_column, right_column)
+        self.model.update_relation(old_relation, left_column, right_column, cardinality)
 
         # Persist to database
         result = db.update_relation(
             relation_id, left_column, right_column, cardinality, self._db_path
         )
-
-        # Refresh model
-        self.refresh()
 
         return result
 
@@ -235,17 +228,10 @@ class ModelController:
         if rel_data is None:
             return False
 
-        model = self.model
-
         # Find and remove from model
-        for rel in model.adjacency.get(rel_data.left_cube, []):
-            if (
-                rel.right_cube.name == rel_data.right_cube
-                and rel.left_column == rel_data.left_column
-                and rel.right_column == rel_data.right_column
-            ):
-                model.remove_relation(rel)
-                break
+        relation = self._find_relation_in_model(rel_data)
+        if relation is not None:
+            self.model.remove_relation(relation)
 
         # Persist to database
         return db.delete_relation(relation_id, self._db_path)

@@ -386,8 +386,9 @@ class Model:
         old_relation: Relation,
         left_column: str | None = None,
         right_column: str | None = None,
+        cardinality: Cardinality | None = None,
     ) -> bool:
-        """Update a relation's column mappings by replacing it."""
+        """Update a relation's column mappings and/or cardinality by replacing it."""
         left_name = old_relation.left_cube.name
         if (
             left_name not in self.adjacency
@@ -400,6 +401,9 @@ class Model:
         )
         new_right_col = (
             right_column if right_column is not None else old_relation.right_column
+        )
+        new_cardinality = (
+            cardinality if cardinality is not None else old_relation.cardinality
         )
 
         if new_left_col not in old_relation.left_cube.columns:
@@ -416,13 +420,13 @@ class Model:
             rel for rel in self.adjacency[left_name] if rel != old_relation
         ]
 
-        # Add new relation (preserving cardinality)
+        # Add new relation
         new_relation = Relation(
             left_cube=old_relation.left_cube,
             right_cube=old_relation.right_cube,
             left_column=new_left_col,
             right_column=new_right_col,
-            cardinality=old_relation.cardinality,
+            cardinality=new_cardinality,
         )
         self.adjacency[left_name].append(new_relation)
         self._invalidate_reachability_caches()
