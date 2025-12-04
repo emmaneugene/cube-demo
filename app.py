@@ -3,7 +3,7 @@
 import streamlit as st
 from streamlit_agraph import Config, Edge, Node, agraph
 
-from cube_demo import Cardinality, Model, db
+from cube_demo import Cardinality, Model, ModelController
 
 st.set_page_config(
     page_title="Cube Model Visualizer",
@@ -11,9 +11,17 @@ st.set_page_config(
     layout="wide",
 )
 
-# Initialize database
-db.init_db()
-db.init_sample_data()
+
+@st.cache_resource
+def get_controller() -> ModelController:
+    """Get or create the model controller (cached)."""
+    ctrl = ModelController()
+    ctrl.init_db()
+    ctrl.init_sample_data()
+    return ctrl
+
+
+controller = get_controller()
 
 # Custom CSS for better styling
 st.markdown(
@@ -60,8 +68,8 @@ st.markdown(
 
 
 def load_model() -> Model:
-    """Load model from database."""
-    return db.load_model_from_db()
+    """Load model from controller."""
+    return controller.refresh()
 
 
 def model_to_agraph(model: Model) -> tuple[list[Node], list[Edge]]:
@@ -135,7 +143,7 @@ def render_cube_editor(model: Model):
                         if c.strip()
                     ]
                     try:
-                        db.create_cube(new_cube_name, columns)
+                        controller.create_cube(new_cube_name, columns)
                         st.success(f"Created cube '{new_cube_name}'")
                         st.rerun()
                     except Exception as e:
@@ -173,14 +181,14 @@ def render_cube_editor(model: Model):
                         c.strip() for c in new_columns.strip().split("\n") if c.strip()
                     ]
                     try:
-                        db.update_cube(cube.name, new_name=new_name, columns=columns)
+                        controller.update_cube(cube.name, new_name=new_name, columns=columns)
                         st.success(f"Updated cube '{new_name}'")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
 
                 if delete_clicked:
-                    db.delete_cube(cube.name)
+                    controller.delete_cube(cube.name)
                     st.success(f"Deleted cube '{cube.name}'")
                     st.rerun()
 
@@ -259,7 +267,7 @@ def render_relation_editor(model: Model):
                         and right_column
                     ):
                         try:
-                            db.create_relation(
+                            controller.create_relation(
                                 left_cube_name,
                                 right_cube_name,
                                 left_column,
@@ -278,7 +286,7 @@ def render_relation_editor(model: Model):
         st.info("Add at least 2 cubes to create relations")
 
     # List existing relations with delete
-    relations_data = db.get_all_relations()
+    relations_data = controller.get_all_relations()
 
     if relations_data:
         st.caption("Existing Relations")
@@ -340,7 +348,7 @@ def render_relation_editor(model: Model):
 
                 if save_clicked:
                     try:
-                        db.update_relation(
+                        controller.update_relation(
                             rel["id"],
                             left_column=new_left_col,
                             right_column=new_right_col,
@@ -351,7 +359,7 @@ def render_relation_editor(model: Model):
                         st.error(f"Error: {e}")
 
                 if delete_clicked:
-                    db.delete_relation(rel["id"])
+                    controller.delete_relation(rel["id"])
                     st.success("Deleted relation")
                     st.rerun()
 

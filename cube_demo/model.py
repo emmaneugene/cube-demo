@@ -179,6 +179,29 @@ class Model:
         self.cubes[cube.name] = cube
         self._invalidate_reachability_caches()
 
+    def remove_cube(self, name: str) -> bool:
+        """Remove a cube and all relations referencing it."""
+        if name not in self.cubes:
+            return False
+
+        # Remove outgoing relations from this cube
+        if name in self.adjacency:
+            del self.adjacency[name]
+
+        # Remove incoming relations to this cube from all other cubes
+        for source in list(self.adjacency.keys()):
+            self.adjacency[source] = [
+                rel for rel in self.adjacency[source] if rel.right_cube.name != name
+            ]
+            # Clean up empty lists
+            if not self.adjacency[source]:
+                del self.adjacency[source]
+
+        # Remove the cube
+        del self.cubes[name]
+        self._invalidate_reachability_caches()
+        return True
+
     def get_cube(self, name: str) -> Cube:
         """Get a cube by name."""
         if name not in self.cubes:
@@ -282,29 +305,6 @@ class Model:
             self.adjacency[left_name] = []
         self.adjacency[left_name].append(relation)
         self._invalidate_reachability_caches()
-
-    def remove_cube(self, name: str) -> bool:
-        """Remove a cube and all relations referencing it."""
-        if name not in self.cubes:
-            return False
-
-        # Remove outgoing relations from this cube
-        if name in self.adjacency:
-            del self.adjacency[name]
-
-        # Remove incoming relations to this cube from all other cubes
-        for source in list(self.adjacency.keys()):
-            self.adjacency[source] = [
-                rel for rel in self.adjacency[source] if rel.right_cube.name != name
-            ]
-            # Clean up empty lists
-            if not self.adjacency[source]:
-                del self.adjacency[source]
-
-        # Remove the cube
-        del self.cubes[name]
-        self._invalidate_reachability_caches()
-        return True
 
     def rename_cube(self, old_name: str, new_name: str) -> bool:
         """Rename a cube, updating all references."""
@@ -443,32 +443,35 @@ class Model:
 
         return {"nodes": nodes, "edges": edges}
 
-    def generate_sql_query(self, selected_columns: list[str]) -> str:
-        """Generate a SQL query with JOINs based on selected columns.
+    def get_join_path(self, selected_columns: list[str]) -> list[Join]:
+        """Get the ordered list of joins needed to query the selected columns.
 
         Uses the precomputed reachability dictionary to find a starting cube
-        that can reach all involved cubes. Includes all columns from the
-        starting cube in the SELECT clause.
+        that can reach all involved cubes, then traces the join paths.
 
         Args:
             selected_columns: List of columns in "cube.column" format
 
         Returns:
-            SQL query string or error message starting with "Error:"
+            List of Join objects in the order they should be applied.
+            Returns empty list if only one cube is involved.
+
+        Raises:
+            ValueError: If columns are invalid or cubes are unreachable.
         """
         if not selected_columns:
-            return "Error: No columns selected"
+            raise ValueError("No columns selected")
 
         # Parse selected columns to get cube names
         cube_columns_selected: dict[str, list[str]] = {}
         for col_ref in selected_columns:
             if "." not in col_ref:
-                return f"Error: Invalid column format: {col_ref}"
+                raise ValueError(f"Invalid column format: {col_ref}")
             cube_name, col_name = col_ref.split(".", 1)
             if cube_name not in self.cubes:
-                return f"Error: Cube '{cube_name}' not found"
+                raise ValueError(f"Cube '{cube_name}' not found")
             if col_name not in self.cubes[cube_name].columns:
-                return f"Error: Column '{col_name}' not found in cube '{cube_name}'"
+                raise ValueError(f"Column '{col_name}' not found in cube '{cube_name}'")
             if cube_name not in cube_columns_selected:
                 cube_columns_selected[cube_name] = []
             cube_columns_selected[cube_name].append(col_name)
@@ -477,9 +480,7 @@ class Model:
 
         # If only one cube, no JOINs needed
         if len(needed_cubes) == 1:
-            cube_name = next(iter(needed_cubes))
-            cols = ", ".join(f"{cube_name}.{c}" for c in self.cubes[cube_name].columns)
-            return f"SELECT {cols}\nFROM {cube_name}"
+            return []
 
         # Find all candidate starting cubes that can reach all involved cubes
         reachability = self.reachability
@@ -492,7 +493,7 @@ class Model:
                 )
 
         if not candidates:
-            return "Error: No cube can reach all selected cubes. Check reachability."
+            raise ValueError("No cube can reach all selected cubes. Check reachability.")
 
         # Select the candidate with the minimum total joins
         start_cube = min(candidates, key=lambda x: x[1])[0]
@@ -520,11 +521,10 @@ class Model:
         # Trace path for cubes to be joined
         cubes_to_join = needed_cubes - {start_cube}
         joined_cubes = {start_cube}
-        join_clauses: list[str] = []
+        joins: list[Join] = []
 
         # For each cube needed, trace back to find the join path
         for target in list(cubes_to_join):
-            print(f"Tracing path for {target}")
             path: list[Join] = []
             current = target
             while current != start_cube and current not in joined_cubes:
@@ -534,19 +534,40 @@ class Model:
                 path.insert(0, join)
                 current = join.from_cube
 
-
-            print(f"Path for {target}:")
-            for join in path:
-                print(f"{join.from_cube} → ", end="")
-            print(f"{join.to_cube}")
-
             for join in path:
                 if join.to_cube not in joined_cubes:
-                    join_clauses.append(join.to_sql())
+                    joins.append(join)
                     joined_cubes.add(join.to_cube)
 
+        return joins
 
-        # Combine
+    def generate_sql_query(self, selected_columns: list[str]) -> str:
+        """Generate a SQL query with JOINs based on selected columns.
+
+        Uses get_join_path to determine the necessary joins.
+
+        Args:
+            selected_columns: List of columns in "cube.column" format
+
+        Returns:
+            SQL query string or error message starting with "Error:"
+        """
+        try:
+            joins = self.get_join_path(selected_columns)
+        except ValueError as e:
+            return f"Error: {e}"
+
+        # Determine start cube
+        if joins:
+            start_cube = joins[0].from_cube
+        else:
+            # Single cube case - extract from first selected column
+            cube_name = selected_columns[0].split(".", 1)[0]
+            cols = ", ".join(f"{cube_name}.{c}" for c in self.cubes[cube_name].columns)
+            return f"SELECT {cols}\nFROM {cube_name}"
+
+        # Build SQL with joins
+        join_clauses = [join.to_sql() for join in joins]
         sql_parts = [
             f"SELECT {', '.join(selected_columns)}",
             f"FROM {start_cube}",
