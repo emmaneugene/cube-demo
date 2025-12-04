@@ -6,7 +6,7 @@ Validates all operations through the Model before persisting to the database.
 from pathlib import Path
 
 from cube_demo import database as db
-from cube_demo.model import Cardinality, Cube, Model, Relation
+from cube_demo.model import Cardinality, Cube, Model, Relation, RelationData
 
 
 class ModelController:
@@ -183,25 +183,25 @@ class ModelController:
         """
         # Get relation data from DB to find the relation object
         relations_data = db.get_all_relations(self._db_path)
-        rel_data = next((r for r in relations_data if r["id"] == relation_id), None)
+        rel_data = next((r for r in relations_data if r.id == relation_id), None)
 
         if rel_data is None:
             return False
 
         model = self.model
-        left_cube = model.cubes.get(rel_data["left_cube"])
-        right_cube = model.cubes.get(rel_data["right_cube"])
+        left_cube = model.cubes.get(rel_data.left_cube)
+        right_cube = model.cubes.get(rel_data.right_cube)
 
         if left_cube is None or right_cube is None:
             return False
 
         # Find the relation in the model
         old_relation = None
-        for rel in model.adjacency.get(rel_data["left_cube"], []):
+        for rel in model.adjacency.get(rel_data.left_cube, []):
             if (
-                rel.right_cube.name == rel_data["right_cube"]
-                and rel.left_column == rel_data["left_column"]
-                and rel.right_column == rel_data["right_column"]
+                rel.right_cube.name == rel_data.right_cube
+                and rel.left_column == rel_data.left_column
+                and rel.right_column == rel_data.right_column
             ):
                 old_relation = rel
                 break
@@ -230,7 +230,7 @@ class ModelController:
         """Delete a relation by ID."""
         # Get relation data to remove from model
         relations_data = db.get_all_relations(self._db_path)
-        rel_data = next((r for r in relations_data if r["id"] == relation_id), None)
+        rel_data = next((r for r in relations_data if r.id == relation_id), None)
 
         if rel_data is None:
             return False
@@ -238,11 +238,11 @@ class ModelController:
         model = self.model
 
         # Find and remove from model
-        for rel in model.adjacency.get(rel_data["left_cube"], []):
+        for rel in model.adjacency.get(rel_data.left_cube, []):
             if (
-                rel.right_cube.name == rel_data["right_cube"]
-                and rel.left_column == rel_data["left_column"]
-                and rel.right_column == rel_data["right_column"]
+                rel.right_cube.name == rel_data.right_cube
+                and rel.left_column == rel_data.left_column
+                and rel.right_column == rel_data.right_column
             ):
                 model.remove_relation(rel)
                 break
@@ -250,7 +250,7 @@ class ModelController:
         # Persist to database
         return db.delete_relation(relation_id, self._db_path)
 
-    def get_all_relations(self) -> list[dict]:
+    def get_all_relations(self) -> list[RelationData]:
         """Get all relations from the database."""
         return db.get_all_relations(self._db_path)
 

@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
-from cube_demo.model import Cardinality, Cube, Relation
+from cube_demo.model import Cardinality, Cube, Relation, RelationData
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "cube_model.db"
 
@@ -34,18 +34,9 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS cubes (
                 name TEXT PRIMARY KEY,
-                columns TEXT NOT NULL DEFAULT '[]',
-                reachable_cubes TEXT NOT NULL DEFAULT '[]'
+                columns TEXT NOT NULL DEFAULT '[]'
             )
         """)
-
-        # Migration: add reachable_cubes column if it doesn't exist
-        cursor.execute("PRAGMA table_info(cubes)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if "reachable_cubes" not in columns:
-            cursor.execute(
-                "ALTER TABLE cubes ADD COLUMN reachable_cubes TEXT NOT NULL DEFAULT '[]'"
-            )
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS relations (
@@ -231,7 +222,7 @@ def create_relation(
     return relation_id
 
 
-def get_all_relations(db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
+def get_all_relations(db_path: Path = DEFAULT_DB_PATH) -> list[RelationData]:
     """Get all relations from the database."""
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
@@ -243,14 +234,14 @@ def get_all_relations(db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
         rows = cursor.fetchall()
 
     return [
-        {
-            "id": row["id"],
-            "left_cube": row["left_cube"],
-            "right_cube": row["right_cube"],
-            "left_column": row["left_column"],
-            "right_column": row["right_column"],
-            "cardinality": Cardinality(row["cardinality"]),
-        }
+        RelationData(
+            id=row["id"],
+            left_cube=row["left_cube"],
+            right_cube=row["right_cube"],
+            left_column=row["left_column"],
+            right_column=row["right_column"],
+            cardinality=Cardinality(row["cardinality"]),
+        )
         for row in rows
     ]
 
@@ -320,17 +311,17 @@ def load_model_from_db(db_path: Path = DEFAULT_DB_PATH):
 
     # Add all relations
     for rel_data in relations_data:
-        left_cube = cube_map.get(rel_data["left_cube"])
-        right_cube = cube_map.get(rel_data["right_cube"])
+        left_cube = cube_map.get(rel_data.left_cube)
+        right_cube = cube_map.get(rel_data.right_cube)
 
         if left_cube and right_cube:
             try:
                 relation = Relation(
                     left_cube=left_cube,
                     right_cube=right_cube,
-                    left_column=rel_data["left_column"],
-                    right_column=rel_data["right_column"],
-                    cardinality=rel_data["cardinality"],
+                    left_column=rel_data.left_column,
+                    right_column=rel_data.right_column,
+                    cardinality=rel_data.cardinality,
                 )
                 model.add_relation(relation)
             except ValueError:

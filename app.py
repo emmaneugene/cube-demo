@@ -291,47 +291,47 @@ def render_relation_editor(model: Model):
     if relations_data:
         st.caption("Existing Relations")
     for rel in relations_data:
-        rel_label = f"{rel['left_cube']}.{rel['left_column']} → {rel['right_cube']}.{rel['right_column']} [{rel['cardinality'].value}]"
+        rel_label = f"{rel.left_cube}.{rel.left_column} → {rel.right_cube}.{rel.right_column} [{rel.cardinality.value}]"
 
         with st.expander(f"{rel_label}", expanded=False):
-            with st.form(f"edit_rel_{rel['id']}"):
-                st.markdown(f"**From:** `{rel['left_cube']}`")
-                st.markdown(f"**To:** `{rel['right_cube']}`")
+            with st.form(f"edit_rel_{rel.id}"):
+                st.markdown(f"**From:** `{rel.left_cube}`")
+                st.markdown(f"**To:** `{rel.right_cube}`")
 
                 # Get available columns
-                left_cube = model.cubes.get(rel["left_cube"])
-                right_cube = model.cubes.get(rel["right_cube"])
+                left_cube = model.cubes.get(rel.left_cube)
+                right_cube = model.cubes.get(rel.right_cube)
 
                 col1, col2 = st.columns(2)
 
                 with col1:
-                    left_cols = left_cube.columns if left_cube else [rel["left_column"]]
+                    left_cols = left_cube.columns if left_cube else [rel.left_column]
                     left_idx = (
-                        left_cols.index(rel["left_column"])
-                        if rel["left_column"] in left_cols
+                        left_cols.index(rel.left_column)
+                        if rel.left_column in left_cols
                         else 0
                     )
                     new_left_col = st.selectbox(
                         "From Column",
                         left_cols,
                         index=left_idx,
-                        key=f"rel_left_{rel['id']}",
+                        key=f"rel_left_{rel.id}",
                     )
 
                 with col2:
                     right_cols = (
-                        right_cube.columns if right_cube else [rel["right_column"]]
+                        right_cube.columns if right_cube else [rel.right_column]
                     )
                     right_idx = (
-                        right_cols.index(rel["right_column"])
-                        if rel["right_column"] in right_cols
+                        right_cols.index(rel.right_column)
+                        if rel.right_column in right_cols
                         else 0
                     )
                     new_right_col = st.selectbox(
                         "To Column",
                         right_cols,
                         index=right_idx,
-                        key=f"rel_right_{rel['id']}",
+                        key=f"rel_right_{rel.id}",
                     )
 
                 col3, col4 = st.columns(2)
@@ -349,7 +349,7 @@ def render_relation_editor(model: Model):
                 if save_clicked:
                     try:
                         controller.update_relation(
-                            rel["id"],
+                            rel.id,
                             left_column=new_left_col,
                             right_column=new_right_col,
                         )
@@ -359,7 +359,7 @@ def render_relation_editor(model: Model):
                         st.error(f"Error: {e}")
 
                 if delete_clicked:
-                    controller.delete_relation(rel["id"])
+                    controller.delete_relation(rel.id)
                     st.success("Deleted relation")
                     st.rerun()
 

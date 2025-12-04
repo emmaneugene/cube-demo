@@ -1,3 +1,4 @@
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
@@ -69,6 +70,7 @@ class Relation:
                 self.right_cube.name,
                 self.left_column,
                 self.right_column,
+                self.cardinality,
             )
         )
 
@@ -80,12 +82,25 @@ class Relation:
             and self.right_cube.name == other.right_cube.name
             and self.left_column == other.left_column
             and self.right_column == other.right_column
+            and self.cardinality == other.cardinality
         )
 
     @property
     def label(self) -> str:
         """Returns a label describing the join."""
         return f"{self.left_cube.name}.{self.left_column} → {self.right_cube.name}.{self.right_column} ({self.cardinality.value})"
+
+
+@dataclass
+class RelationData:
+    """Represents relation data from the database (without Cube object references)."""
+
+    id: int
+    left_cube: str
+    right_cube: str
+    left_column: str
+    right_column: str
+    cardinality: Cardinality
 
 
 @dataclass
@@ -136,11 +151,11 @@ class Model:
 
         for cube_name in self.cubes:
             distances: dict[str, int] = {}
-            queue = [(cube_name, 0)]
+            queue: deque[tuple[str, int]] = deque([(cube_name, 0)])
             visited = {cube_name}
 
             while queue:
-                current, dist = queue.pop(0)
+                current, dist = queue.popleft()
                 for rel in self.adjacency.get(current, []):
                     target = rel.right_cube.name
                     if target not in visited:
@@ -231,11 +246,11 @@ class Model:
                 in_degree[rel.right_cube.name] += 1
 
         # Start with cubes that have no incoming edges
-        queue = [name for name in self.cubes if in_degree[name] == 0]
+        queue: deque[str] = deque(name for name in self.cubes if in_degree[name] == 0)
         result: list[str] = []
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             result.append(current)
 
             # Reduce in-degree for neighbors
@@ -463,7 +478,7 @@ class Model:
             raise ValueError("No columns selected")
 
         # Parse selected columns to get cube names
-        cube_columns_selected: dict[str, list[str]] = {}
+        needed_cubes: set[str] = set()
         for col_ref in selected_columns:
             if "." not in col_ref:
                 raise ValueError(f"Invalid column format: {col_ref}")
@@ -472,11 +487,7 @@ class Model:
                 raise ValueError(f"Cube '{cube_name}' not found")
             if col_name not in self.cubes[cube_name].columns:
                 raise ValueError(f"Column '{col_name}' not found in cube '{cube_name}'")
-            if cube_name not in cube_columns_selected:
-                cube_columns_selected[cube_name] = []
-            cube_columns_selected[cube_name].append(col_name)
-
-        needed_cubes = set(cube_columns_selected.keys())
+            needed_cubes.add(cube_name)
 
         # If only one cube, no JOINs needed
         if len(needed_cubes) == 1:
@@ -500,11 +511,11 @@ class Model:
 
         # Do BFS from start_cube to find join paths
         visited = {start_cube}
-        queue = [start_cube]
+        queue: deque[str] = deque([start_cube])
         join_to: dict[str, Join | None] = {start_cube: None}
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             for rel in self.adjacency.get(current, []):
                 target = rel.right_cube.name
                 if target not in visited:
