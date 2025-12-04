@@ -67,9 +67,9 @@ def init_sample_data(db_path: Path = DEFAULT_DB_PATH) -> None:
             ("2", ["id", "field2"]),
             ("3", ["id", "order_id", "product_id", "quantity", "unit_price"]),
             ("4", ["id", "name", "category", "price", "stock"]),
-            ("5", ["id", "customer_id", "order_date", "total", "status"]),
-            ("6", ["id", "name", "email", "created_at"]),
-            ("7", ["id", "name", "description"]),
+            ("5", ["id", "name", "description"]),
+            ("6", ["id", "customer_id", "order_date", "total", "status"]),
+            ("7", ["id", "name", "email", "created_at"]),
             ("8", ["id", "count", "field"]),
         ]
 
@@ -84,9 +84,9 @@ def init_sample_data(db_path: Path = DEFAULT_DB_PATH) -> None:
             ("1", "3", "id", "id", Cardinality.MANY_TO_ONE),
             ("2", "3", "id", "id", Cardinality.ONE_TO_MANY),
             ("3", "4", "product_id", "id", Cardinality.MANY_TO_ONE),
-            ("3", "5", "order_id", "id", Cardinality.MANY_TO_ONE),
-            ("4", "7", "id", "id", Cardinality.ONE_TO_ONE),
-            ("5", "6", "customer_id", "id", Cardinality.MANY_TO_ONE),
+            ("4", "5", "id", "id", Cardinality.ONE_TO_ONE),
+            ("3", "6", "order_id", "id", Cardinality.MANY_TO_ONE),
+            ("6", "7", "customer_id", "id", Cardinality.MANY_TO_ONE),
         ]
 
         for left_cube, right_cube, left_col, right_col, cardinality in sample_relations:
