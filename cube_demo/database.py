@@ -2,159 +2,149 @@
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Generator
 
 from cube_demo.model import Cardinality, Cube, Relation
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "cube_model.db"
 
 
-def get_connection(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    """Get a database connection."""
+@contextmanager
+def get_connection(db_path: Path = DEFAULT_DB_PATH) -> Generator[sqlite3.Connection, None, None]:
+    """Get a database connection as a context manager.
+
+    Auto-commits on success and always closes the connection.
+    """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
     """Initialize the database schema."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cubes (
-            name TEXT PRIMARY KEY,
-            columns TEXT NOT NULL DEFAULT '[]',
-            reachable_cubes TEXT NOT NULL DEFAULT '[]'
-        )
-    """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cubes (
+                name TEXT PRIMARY KEY,
+                columns TEXT NOT NULL DEFAULT '[]',
+                reachable_cubes TEXT NOT NULL DEFAULT '[]'
+            )
+        """)
 
-    # Migration: add reachable_cubes column if it doesn't exist
-    cursor.execute("PRAGMA table_info(cubes)")
-    columns = [row[1] for row in cursor.fetchall()]
-    if "reachable_cubes" not in columns:
-        cursor.execute(
-            "ALTER TABLE cubes ADD COLUMN reachable_cubes TEXT NOT NULL DEFAULT '[]'"
-        )
+        # Migration: add reachable_cubes column if it doesn't exist
+        cursor.execute("PRAGMA table_info(cubes)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "reachable_cubes" not in columns:
+            cursor.execute(
+                "ALTER TABLE cubes ADD COLUMN reachable_cubes TEXT NOT NULL DEFAULT '[]'"
+            )
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS relations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            left_cube TEXT NOT NULL,
-            right_cube TEXT NOT NULL,
-            left_column TEXT NOT NULL,
-            right_column TEXT NOT NULL,
-            cardinality TEXT NOT NULL DEFAULT 'one-to-many',
-            FOREIGN KEY (left_cube) REFERENCES cubes(name) ON DELETE CASCADE,
-            FOREIGN KEY (right_cube) REFERENCES cubes(name) ON DELETE CASCADE
-        )
-    """)
-
-    conn.commit()
-    conn.close()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS relations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                left_cube TEXT NOT NULL,
+                right_cube TEXT NOT NULL,
+                left_column TEXT NOT NULL,
+                right_column TEXT NOT NULL,
+                cardinality TEXT NOT NULL DEFAULT 'one-to-many',
+                FOREIGN KEY (left_cube) REFERENCES cubes(name) ON DELETE CASCADE,
+                FOREIGN KEY (right_cube) REFERENCES cubes(name) ON DELETE CASCADE
+            )
+        """)
 
 
 def init_sample_data(db_path: Path = DEFAULT_DB_PATH) -> None:
     """Initialize with sample e-commerce data if database is empty."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
 
-    cursor.execute("SELECT COUNT(*) FROM cubes")
-    if cursor.fetchone()[0] > 0:
-        conn.close()
-        return
+        cursor.execute("SELECT COUNT(*) FROM cubes")
+        if cursor.fetchone()[0] > 0:
+            return
 
-    # Sample cubes
-    sample_cubes = [
-        ("1", ["id", "field1"]),
-        ("2", ["id", "field2"]),
-        ("3", ["id", "order_id", "product_id", "quantity", "unit_price"]),
-        ("4", ["id", "name", "category", "price", "stock"]),
-        ("5", ["id", "customer_id", "order_date", "total", "status"]),
-        ("6", ["id", "name", "email", "created_at"]),
-        ("7", ["id", "name", "description"]),
-        ("8", ["id", "count", "field"]),
+        # Sample cubes
+        sample_cubes = [
+            ("1", ["id", "field1"]),
+            ("2", ["id", "field2"]),
+            ("3", ["id", "order_id", "product_id", "quantity", "unit_price"]),
+            ("4", ["id", "name", "category", "price", "stock"]),
+            ("5", ["id", "customer_id", "order_date", "total", "status"]),
+            ("6", ["id", "name", "email", "created_at"]),
+            ("7", ["id", "name", "description"]),
+            ("8", ["id", "count", "field"]),
+        ]
 
-    ]
+        for name, columns in sample_cubes:
+            cursor.execute(
+                "INSERT INTO cubes (name, columns) VALUES (?, ?)",
+                (name, json.dumps(columns)),
+            )
 
-    for name, columns in sample_cubes:
-        cursor.execute(
-            "INSERT INTO cubes (name, columns) VALUES (?, ?)",
-            (name, json.dumps(columns)),
-        )
+        # Sample relations (left_cube, right_cube, left_col, right_col, cardinality)
+        sample_relations = [
+            ("1", "3", "id", "id", Cardinality.MANY_TO_ONE),
+            ("2", "3", "id", "id", Cardinality.ONE_TO_MANY),
+            ("3", "4", "product_id", "id", Cardinality.MANY_TO_ONE),
+            ("3", "5", "order_id", "id", Cardinality.MANY_TO_ONE),
+            ("4", "7", "id", "id", Cardinality.ONE_TO_ONE),
+            ("5", "6", "customer_id", "id", Cardinality.MANY_TO_ONE),
+        ]
 
-    # Sample relations (left_cube, right_cube, left_col, right_col, cardinality)
-    sample_relations = [
-        ("1", "3", "id", "id", Cardinality.MANY_TO_ONE),
-        ("2", "3", "id", "id", Cardinality.ONE_TO_MANY),
-        ("3", "4", "product_id", "id", Cardinality.MANY_TO_ONE),
-        ("3", "5", "order_id", "id", Cardinality.MANY_TO_ONE),
-        ("4", "7", "id", "id", Cardinality.ONE_TO_ONE),
-        ("5", "6", "customer_id", "id", Cardinality.MANY_TO_ONE),
-    ]
-
-    for left_cube, right_cube, left_col, right_col, cardinality in sample_relations:
-        cursor.execute(
-            "INSERT INTO relations (left_cube, right_cube, left_column, right_column, cardinality) VALUES (?, ?, ?, ?, ?)",
-            (left_cube, right_cube, left_col, right_col, cardinality.value),
-        )
-
-    conn.commit()
-    conn.close()
+        for left_cube, right_cube, left_col, right_col, cardinality in sample_relations:
+            cursor.execute(
+                "INSERT INTO relations (left_cube, right_cube, left_column, right_column, cardinality) VALUES (?, ?, ?, ?, ?)",
+                (left_cube, right_cube, left_col, right_col, cardinality.value),
+            )
 
 
 def delete_all_data(db_path: Path = DEFAULT_DB_PATH) -> None:
     """Delete all data from the database."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM relations")
-    cursor.execute("DELETE FROM cubes")
-    conn.commit()
-    conn.close()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM relations")
+        cursor.execute("DELETE FROM cubes")
+
 
 # Cube CRUD operations
 
 
 def create_cube(name: str, columns: list[str], db_path: Path = DEFAULT_DB_PATH) -> Cube:
     """Create a new cube in the database."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "INSERT INTO cubes (name, columns) VALUES (?, ?)",
-        (name, json.dumps(columns)),
-    )
-
-    conn.commit()
-    conn.close()
-
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO cubes (name, columns) VALUES (?, ?)",
+            (name, json.dumps(columns)),
+        )
     return Cube(name=name, columns=columns)
 
 
 def get_cube(name: str, db_path: Path = DEFAULT_DB_PATH) -> Cube | None:
     """Get a cube by name."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT name, columns FROM cubes WHERE name = ?", (name,))
-    row = cursor.fetchone()
-    conn.close()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, columns FROM cubes WHERE name = ?", (name,))
+        row = cursor.fetchone()
 
     if row is None:
         return None
-
     return Cube(name=row["name"], columns=json.loads(row["columns"]))
 
 
 def get_all_cubes(db_path: Path = DEFAULT_DB_PATH) -> list[Cube]:
     """Get all cubes from the database."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT name, columns FROM cubes ORDER BY name")
-    rows = cursor.fetchall()
-    conn.close()
-
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, columns FROM cubes ORDER BY name")
+        rows = cursor.fetchall()
     return [Cube(name=row["name"], columns=json.loads(row["columns"])) for row in rows]
 
 
@@ -165,63 +155,56 @@ def update_cube(
     db_path: Path = DEFAULT_DB_PATH,
 ) -> Cube | None:
     """Update a cube's name and/or columns."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
 
-    # Get current cube
-    cursor.execute("SELECT name, columns FROM cubes WHERE name = ?", (name,))
-    row = cursor.fetchone()
-    if row is None:
-        conn.close()
-        return None
+        # Get current cube
+        cursor.execute("SELECT name, columns FROM cubes WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        if row is None:
+            return None
 
-    current_columns = json.loads(row["columns"])
-    final_name = new_name if new_name is not None else name
-    final_columns = columns if columns is not None else current_columns
+        current_columns = json.loads(row["columns"])
+        final_name = new_name if new_name is not None else name
+        final_columns = columns if columns is not None else current_columns
 
-    if new_name is not None and new_name != name:
-        # Rename: update cube name and all relations referencing it
-        cursor.execute(
-            "UPDATE cubes SET name = ?, columns = ? WHERE name = ?",
-            (final_name, json.dumps(final_columns), name),
-        )
-        cursor.execute(
-            "UPDATE relations SET left_cube = ? WHERE left_cube = ?",
-            (final_name, name),
-        )
-        cursor.execute(
-            "UPDATE relations SET right_cube = ? WHERE right_cube = ?",
-            (final_name, name),
-        )
-    else:
-        cursor.execute(
-            "UPDATE cubes SET columns = ? WHERE name = ?",
-            (json.dumps(final_columns), name),
-        )
-
-    conn.commit()
-    conn.close()
+        if new_name is not None and new_name != name:
+            # Rename: update cube name and all relations referencing it
+            cursor.execute(
+                "UPDATE cubes SET name = ?, columns = ? WHERE name = ?",
+                (final_name, json.dumps(final_columns), name),
+            )
+            cursor.execute(
+                "UPDATE relations SET left_cube = ? WHERE left_cube = ?",
+                (final_name, name),
+            )
+            cursor.execute(
+                "UPDATE relations SET right_cube = ? WHERE right_cube = ?",
+                (final_name, name),
+            )
+        else:
+            cursor.execute(
+                "UPDATE cubes SET columns = ? WHERE name = ?",
+                (json.dumps(final_columns), name),
+            )
 
     return Cube(name=final_name, columns=final_columns)
 
 
 def delete_cube(name: str, db_path: Path = DEFAULT_DB_PATH) -> bool:
     """Delete a cube and all its relations."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
 
-    # Delete relations first
-    cursor.execute(
-        "DELETE FROM relations WHERE left_cube = ? OR right_cube = ?",
-        (name, name),
-    )
+        # Delete relations first
+        cursor.execute(
+            "DELETE FROM relations WHERE left_cube = ? OR right_cube = ?",
+            (name, name),
+        )
 
-    # Delete cube
-    cursor.execute("DELETE FROM cubes WHERE name = ?", (name,))
-    deleted = cursor.rowcount > 0
-
-    conn.commit()
-    conn.close()
+        # Delete cube
+        cursor.execute("DELETE FROM cubes WHERE name = ?", (name,))
+        deleted = cursor.rowcount > 0
 
     return deleted
 
@@ -238,33 +221,26 @@ def create_relation(
     db_path: Path = DEFAULT_DB_PATH,
 ) -> int | None:
     """Create a new relation in the database. Returns the relation ID."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "INSERT INTO relations (left_cube, right_cube, left_column, right_column, cardinality) VALUES (?, ?, ?, ?, ?)",
-        (left_cube, right_cube, left_column, right_column, cardinality.value),
-    )
-
-    relation_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO relations (left_cube, right_cube, left_column, right_column, cardinality) VALUES (?, ?, ?, ?, ?)",
+            (left_cube, right_cube, left_column, right_column, cardinality.value),
+        )
+        relation_id = cursor.lastrowid
     return relation_id
 
 
 def get_all_relations(db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
     """Get all relations from the database."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT id, left_cube, right_cube, left_column, right_column, cardinality
-        FROM relations
-        ORDER BY id
-    """)
-    rows = cursor.fetchall()
-    conn.close()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, left_cube, right_cube, left_column, right_column, cardinality
+            FROM relations
+            ORDER BY id
+        """)
+        rows = cursor.fetchall()
 
     return [
         {
@@ -287,11 +263,8 @@ def update_relation(
     db_path: Path = DEFAULT_DB_PATH,
 ) -> bool:
     """Update a relation's column mappings and/or cardinality."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
-
     updates = []
-    params = []
+    params: list[str | int] = []
 
     if left_column is not None:
         updates.append("left_column = ?")
@@ -306,33 +279,27 @@ def update_relation(
         params.append(cardinality.value)
 
     if not updates:
-        conn.close()
         return False
 
     params.append(relation_id)
-    cursor.execute(
-        f"UPDATE relations SET {', '.join(updates)} WHERE id = ?",
-        params,
-    )
 
-    updated = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE relations SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
+        updated = cursor.rowcount > 0
 
     return updated
 
 
 def delete_relation(relation_id: int, db_path: Path = DEFAULT_DB_PATH) -> bool:
     """Delete a relation by ID."""
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute("DELETE FROM relations WHERE id = ?", (relation_id,))
-    deleted = cursor.rowcount > 0
-
-    conn.commit()
-    conn.close()
-
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM relations WHERE id = ?", (relation_id,))
+        deleted = cursor.rowcount > 0
     return deleted
 
 
