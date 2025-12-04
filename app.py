@@ -382,6 +382,11 @@ def main():
         st.markdown(f"**Cubes:** {len(model.cubes)}")
         st.markdown(f"**Relations:** {len(model.relations)}")
 
+        if st.button("Restore Sample Data", use_container_width=True):
+            controller.restore_sample_data()
+            st.success("Sample data restored")
+            st.rerun()
+
         st.markdown("---")
 
         # Cube editor

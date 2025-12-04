@@ -40,6 +40,9 @@ class ModelController:
         """Initialize sample data if database is empty."""
         db.init_sample_data(self._db_path)
 
+    def restore_sample_data(self) -> None:
+        db.delete_all_data(self._db_path)
+        db.init_sample_data(self._db_path)
     # Cube operations
 
     def create_cube(self, name: str, columns: list[str]) -> Cube:

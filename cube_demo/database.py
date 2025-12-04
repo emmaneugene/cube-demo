@@ -103,6 +103,15 @@ def init_sample_data(db_path: Path = DEFAULT_DB_PATH) -> None:
     conn.close()
 
 
+def delete_all_data(db_path: Path = DEFAULT_DB_PATH) -> None:
+    """Delete all data from the database."""
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM relations")
+    cursor.execute("DELETE FROM cubes")
+    conn.commit()
+    conn.close()
+
 # Cube CRUD operations
 
 
