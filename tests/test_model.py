@@ -203,8 +203,9 @@ class TestModel:
         model.add_relation(Relation(a, b, "b_id", "id", Cardinality.MANY_TO_ONE))
         model.add_relation(Relation(b, c, "c_id", "id", Cardinality.MANY_TO_ONE))
 
-        # Adding c -> a would create a cycle
-        with pytest.raises(ValueError, match="would create a cycle"):
+        # Adding c -> a would create a cycle (detected as duplicate path since cycle
+        # detection happens after duplicate path check)
+        with pytest.raises(ValueError, match="would create (a cycle|duplicate paths)"):
             model.add_relation(Relation(c, a, "a_id", "id", Cardinality.MANY_TO_ONE))
 
     def test_add_relation_duplicate_path_raises_error(self):
@@ -223,8 +224,27 @@ class TestModel:
         model.add_relation(Relation(b, c, "c_id", "id", Cardinality.MANY_TO_ONE))
 
         # Adding a -> c would create a duplicate path from a to c
-        with pytest.raises(ValueError, match="would create a duplicate path"):
+        with pytest.raises(ValueError, match="would create duplicate paths: a -> c"):
             model.add_relation(Relation(a, c, "c_id", "id", Cardinality.MANY_TO_ONE))
+
+    def test_add_relation_duplicate_path_from_upstream_raises_error(self):
+        """Raises ValueError if the relation creates a duplicate path for an upstream node."""
+        model = Model()
+        a = Cube(name="a", columns=["id", "b_id", "c_id"])
+        b = Cube(name="b", columns=["id", "c_id"])
+        c = Cube(name="c", columns=["id"])
+
+        model.add_cube(a)
+        model.add_cube(b)
+        model.add_cube(c)
+
+        # Create two separate paths from a: a -> b and a -> c
+        model.add_relation(Relation(a, b, "b_id", "id", Cardinality.MANY_TO_ONE))
+        model.add_relation(Relation(a, c, "c_id", "id", Cardinality.MANY_TO_ONE))
+
+        # Adding b -> c would create a duplicate path from a to c (a->c and a->b->c)
+        with pytest.raises(ValueError, match="would create duplicate paths: a -> c"):
+            model.add_relation(Relation(b, c, "c_id", "id", Cardinality.MANY_TO_ONE))
 
     def test_to_graph_data(self):
         model = Model(name="ecommerce")

@@ -303,10 +303,30 @@ class Model:
         if right_name not in self.cubes:
             raise ValueError(f"Right cube '{right_name}' not found in model")
 
-        # Check for duplicate path (if right_cube is already reachable from left_cube)
-        if right_name in self.reachability.get(left_name, {}):
+        # Check for duplicate path - comprehensive check for all upstream nodes
+        # Get all cubes that can reach left_cube (including left_cube itself)
+        can_reach_left = {left_name}
+        for cube_name, reachable in self.reachability.items():
+            if left_name in reachable:
+                can_reach_left.add(cube_name)
+
+        # Get all cubes reachable from right_cube (including right_cube itself)
+        reachable_from_right = {right_name}
+        reachable_from_right.update(self.reachability.get(right_name, {}).keys())
+
+        # Collect all duplicate paths
+        duplicate_paths: list[tuple[str, str]] = []
+        for source in can_reach_left:
+            source_reachability = self.reachability.get(source, {})
+            for target in reachable_from_right:
+                if target in source_reachability:
+                    duplicate_paths.append((source, target))
+
+        if duplicate_paths:
+            paths_str = ", ".join(f"{src} -> {tgt}" for src, tgt in duplicate_paths)
             raise ValueError(
-                f"Adding relation {left_name} -> {right_name} would create a duplicate path"
+                f"Adding relation {left_name} -> {right_name} would create "
+                f"duplicate paths: {paths_str}"
             )
 
         # Check for cycle
